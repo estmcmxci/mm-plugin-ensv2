@@ -25,7 +25,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json && oclif manifest",
     "prepack": "tsc -p tsconfig.json && oclif manifest",
-    "check": "node --input-type=module -e \"import('./dist/lib/ensv2.js').then(m => m.selfCheck())\""
+    "check": "node scripts/check.mjs"
   },
   "oclif": {
     "bin": "mm",
@@ -44,6 +44,42 @@
     "commands": [
       {
         "id": "ensv2:status",
+        "capabilities": [
+          "wallet-read"
+        ],
+        "dataAccess": [
+          "network"
+        ],
+        "targetChains": [
+          11155111
+        ]
+      },
+      {
+        "id": "ensv2:resolve",
+        "capabilities": [
+          "wallet-read"
+        ],
+        "dataAccess": [
+          "network"
+        ],
+        "targetChains": [
+          11155111
+        ]
+      },
+      {
+        "id": "ensv2:whois",
+        "capabilities": [
+          "wallet-read"
+        ],
+        "dataAccess": [
+          "network"
+        ],
+        "targetChains": [
+          11155111
+        ]
+      },
+      {
+        "id": "ensv2:resolver",
         "capabilities": [
           "wallet-read"
         ],
