@@ -14,8 +14,15 @@ npm installs are verified against the registry; no unverified-install flag is ne
 ## Commands
 
 ```
-mm ensv2 status          is this chain serving ENSv2, and does the deployment table agree?
+mm ensv2 status              is this chain serving ENSv2, and does the deployment table agree?
+mm ensv2 resolve <query>     name → address, or 0x address → primary name
+mm ensv2 whois <name>        status, expiry, owner, token id, registration epoch, resolver, subregistry
+mm ensv2 resolver <name>     which resolver answers for the name: its own, an ancestor's, or none
 ```
+
+All four run the same fail-closed gate first. `whois` and `resolver` locate the registry that actually holds the name (`UR.findParentRegistry`) rather than assuming the `.eth` registry — a subname's entry lives in its parent's subregistry, and reading the root for it returns a plausible-looking "AVAILABLE" for a name that is in fact registered.
+
+`whois` reports `owner` only while `REGISTERED` (`latestOwner` is stale after expiry) and surfaces the **registration epoch** alongside the token id: token ids change on any role grant or revoke, so `(registry, canonicalId, registrationEpoch)` is the anchor to key identity off, never the token id.
 
 `status` fails closed. If the Universal Resolver is not serving ENSv2, or the chain's registry hierarchy disagrees with the configured deployment, the command exits non-zero instead of quietly behaving like ENSv1. Every write command added to this plugin runs the same check first.
 
@@ -32,7 +39,10 @@ It performs five reads and reports each one:
 ```bash
 npm install
 npm run build          # tsc + oclif manifest
-npm run check          # runs the detection against a public Sepolia RPC, no wallet needed
+npm run check                      # the five fail-closed checks, public Sepolia RPC, no wallet needed
+npm run check -- whois name.eth
+npm run check -- resolver name.eth
+npm run check -- resolve name.eth  # or an 0x address
 ```
 
 Install into `mm` from a **packed tarball**, not the directory:

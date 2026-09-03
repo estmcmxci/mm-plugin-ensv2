@@ -1,5 +1,4 @@
 import {
-  CommandError,
   type CommandIO,
   InputFieldType,
   type InputSchema,
@@ -7,8 +6,8 @@ import {
   schemaToArgs,
   schemaToFlags,
 } from "@metamask/agent-wallet/plugin";
-import { SEPOLIA_CHAIN_ID, deploymentForChain } from "../../lib/deployments.js";
-import { type Check, detectEnsV2 } from "../../lib/ensv2.js";
+import type { Check } from "../../lib/ensv2.js";
+import { parseChainId, requireEnsV2, toCommandError } from "../../lib/gate.js";
 
 const inputs = {
   chain: {
@@ -34,7 +33,8 @@ type StatusResult = {
  * table agree with it?
  *
  * Fails closed. A non-ENSv2 answer exits non-zero rather than degrading to
- * ENSv1 behaviour. Every write command in this plugin runs this check first.
+ * ENSv1 behaviour. Every other command in this plugin runs the same gate
+ * (`requireEnsV2`) before doing anything.
  */
 export default class EnsV2Status extends PluginCommand<StatusResult> {
   static override description =
@@ -56,42 +56,23 @@ export default class EnsV2Status extends PluginCommand<StatusResult> {
 
   async execute(io: CommandIO): Promise<StatusResult> {
     const { chain } = await io.resolveInputs(inputs);
-    const chainId = chain ? Number(chain) : SEPOLIA_CHAIN_ID;
-    if (!Number.isInteger(chainId) || chainId <= 0) {
-      throw new CommandError("ENSV2_INVALID_CHAIN", `'${chain}' is not a chain id.`, "Pass a numeric EVM chain id, e.g. 11155111 for Sepolia.");
-    }
-
-    const deployment = deploymentForChain(chainId);
-    if (!deployment) {
-      throw new CommandError(
-        "ENSV2_UNSUPPORTED_CHAIN",
-        `No ENSv2 deployment is configured for chain ${chainId}.`,
-        "ENSv2 is a Sepolia beta (chain 11155111). Mainnet stays disabled until a canonical production deployment exists.",
-      );
-    }
-
-    // Host client carries no `chain`; detectEnsV2 passes explicit addresses on every call.
+    const chainId = parseChainId(chain);
+    // Host client carries no `chain`; every read passes an explicit address.
     const client = this.ctx.publicClient(chainId);
-    const result = await detectEnsV2(client, deployment);
 
-    if (!result.isV2) {
-      const failed = result.checks.find((c) => !c.ok);
-      throw new CommandError(
-        "ENSV2_NOT_ACTIVE",
-        `ENSv2 is not active on chain ${chainId}: ${result.reason}.` +
-          (failed ? ` Failed: ${failed.name} (expected ${failed.expected}, got ${failed.actual}).` : ""),
-        "Refusing to continue rather than falling back to ENSv1. Check the RPC endpoint and the deployment table.",
-      );
+    try {
+      const { detection } = await requireEnsV2(client, chainId);
+      return {
+        chainId: detection.chainId,
+        isV2: true,
+        universalResolver: detection.universalResolver,
+        ethRegistry: detection.ethRegistry,
+        rootRegistry: detection.rootRegistry,
+        checks: [...detection.checks],
+      };
+    } catch (error) {
+      throw toCommandError(error);
     }
-
-    return {
-      chainId: result.chainId,
-      isV2: true,
-      universalResolver: result.universalResolver,
-      ethRegistry: result.ethRegistry,
-      rootRegistry: result.rootRegistry,
-      checks: [...result.checks],
-    };
   }
 
   override successHint(data: StatusResult): string {
