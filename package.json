@@ -1,0 +1,70 @@
+{
+  "name": "@estmcmxci/mm-plugin-ensv2",
+  "version": "0.1.0",
+  "description": "ENSv2 for the MetaMask Agent Wallet CLI (mm): fail-closed detection, resolution, and agent identity on Sepolia",
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/estmcmxci/mm-plugin-ensv2.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "oclif-plugin",
+    "ens",
+    "ensv2",
+    "metamask",
+    "agent-wallet"
+  ],
+  "files": [
+    "dist",
+    "oclif.manifest.json"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && oclif manifest",
+    "prepack": "tsc -p tsconfig.json && oclif manifest",
+    "check": "node --input-type=module -e \"import('./dist/lib/ensv2.js').then(m => m.selfCheck())\""
+  },
+  "oclif": {
+    "bin": "mm",
+    "commands": "./dist/commands",
+    "topicSeparator": " ",
+    "topics": {
+      "ensv2": {
+        "description": "ENSv2 names and agent identity (Sepolia)"
+      }
+    }
+  },
+  "mm": {
+    "schemaVersion": 1,
+    "minCliVersion": "^6.2.0",
+    "capabilities": [],
+    "commands": [
+      {
+        "id": "ensv2:status",
+        "capabilities": [
+          "wallet-read"
+        ],
+        "dataAccess": [
+          "network"
+        ],
+        "targetChains": [
+          11155111
+        ]
+      }
+    ]
+  },
+  "peerDependencies": {
+    "@metamask/agent-wallet": "^6.2.0"
+  },
+  "dependencies": {
+    "viem": "^2.35.0"
+  },
+  "devDependencies": {
+    "@metamask/agent-wallet": "^6.2.0",
+    "oclif": "^4",
+    "typescript": "^5"
+  }
+}
