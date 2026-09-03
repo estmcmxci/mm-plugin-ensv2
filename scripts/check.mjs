@@ -13,6 +13,7 @@ import { createPublicClient, http } from "viem";
 import { SEPOLIA } from "../dist/lib/deployments.js";
 import { detectEnsV2, selfCheck } from "../dist/lib/ensv2.js";
 import { resolveQuery, resolverInfo, whois } from "../dist/lib/reads.js";
+import { buildDeployPlan, ownedResolverStatus } from "../dist/lib/resolver.js";
 
 const rpc = process.env.ETH_RPC_URL ?? "https://ethereum-sepolia-rpc.publicnode.com";
 const client = createPublicClient({ transport: http(rpc) });
@@ -49,8 +50,19 @@ try {
     case "resolve":
       show(await resolveQuery(client, await gate(), SEPOLIA.chainId, need(arg, "name|address")));
       break;
+    case "predict":
+      // Where would <owner>'s resolver be, and does it exist? Read-only.
+      show(await ownedResolverStatus(client, await gate(), need(arg, "owner-address")));
+      break;
+    case "deploy-plan": {
+      // The exact calldata `ensv2 resolver deploy` would hand to the wallet. Nothing is sent.
+      const d = await gate();
+      const s = await ownedResolverStatus(client, d, need(arg, "owner-address"));
+      show({ ...buildDeployPlan(d, s), value: "0", alreadyDeployed: s.deployed });
+      break;
+    }
     default:
-      console.error(`unknown check "${cmd}" — one of: status, whois, resolver, resolve`);
+      console.error(`unknown check "${cmd}" — one of: status, whois, resolver, resolve, predict, deploy-plan`);
       process.exit(2);
   }
 } catch (error) {
