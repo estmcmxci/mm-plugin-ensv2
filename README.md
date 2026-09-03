@@ -20,6 +20,8 @@ mm ensv2 whois <name>        status, expiry, owner, token id, registration epoch
 mm ensv2 resolver <name>     which resolver answers for the name: its own, an ancestor's, or none
 mm ensv2 available <name>    can this .eth label be registered? (asks the registrar; accounts for grace + v1 reservations)
 mm ensv2 price <name>        ERC-20 cost to register, quoted by the registrar (--years n, default 1)
+mm ensv2 faucet              mint Sepolia test USDC to this wallet (the beta's payment token) — Sepolia only
+mm ensv2 register <name>     commit → wait → register, paid in USDC, resolver bound at registration; resumable
 mm ensv2 resolver plan       predict THIS WALLET's resolver address + show the deploy calldata (read-only)
 mm ensv2 resolver deploy     deploy this wallet's resolver, once (no-op if it exists) — signs via MetaMask policy
 ```
@@ -29,6 +31,26 @@ mm ensv2 resolver deploy     deploy this wallet's resolver, once (no-op if it ex
 ENSv2 replaces the single shared Public Resolver with **one `PermissionedResolver` proxy per account**. A freshly registered name has no resolver, resolves to nothing, and can hold no records until one is deployed and assigned. `deploy` provisions it through the `VerifiableFactory`: it predicts the CREATE2 address (salt derived from the wallet address, `proxyLogic` read from chain), no-ops if code already exists there, builds the `deployProxy(...)` calldata with the three-argument `initialize(admin, ALL_ROLES, [])`, hands `{to, data, value: 0}` to the wallet executor, waits for the receipt, then re-reads the chain and requires the factory to attest the proxy. The plugin never sees a key.
 
 Run `plan` first to see the address and the exact calldata. Deploying costs only gas.
+
+### How `register` works
+
+Three transactions, each signed through MetaMask policy (MFA if enabled), each verified on chain before the next:
+
+1. `commit(makeCommitment(label, owner, secret, 0, resolver, duration, 0))` — the wallet's resolver is bound into the commitment, so `resolver deploy` must have run first. The secret and parameters are checkpointed to `~/.mm-plugin-ensv2/pending-registrations.json` (mode 0600) **before** this is sent.
+2. `USDC.approve(registrar, total)` — only if the allowance is short; done during the commitment wait.
+3. after chain time ≥ commit + 60 s: `register(...)` — pays the registrar, mints the name, sets the resolver in one call.
+
+Then it checks the registry says `REGISTERED` to you and `UR.findResolver` returns your resolver at offset 0, and clears the checkpoint. Re-running after an interruption resumes with the same secret and commitment; an expired commitment (> 24 h) is re-committed. Price is quoted by the registrar (non-linear over duration; 28-day minimum) and paid in the oracle's ERC-20 — on Sepolia, `mm ensv2 faucet` mints it.
+
+### Installing on a machine where `npm` stalls over IPv6
+
+`mm plugins install` shells out to `npm`, which on some networks sits on a dead IPv6 socket to the registry for its full 5-minute fetch timeout. Force IPv4 for that one command:
+
+```bash
+NODE_OPTIONS=--dns-result-order=ipv4first mm plugins install file:$PWD/estmcmxci-mm-plugin-ensv2-0.1.0.tgz --accept-permissions
+```
+
+Reinstalling the same package name upgrades in place; no uninstall needed.
 
 All commands run the same fail-closed gate first. `whois` and `resolver` locate the registry that actually holds the name (`UR.findParentRegistry`) rather than assuming the `.eth` registry — a subname's entry lives in its parent's subregistry, and reading the root for it returns a plausible-looking "AVAILABLE" for a name that is in fact registered.
 

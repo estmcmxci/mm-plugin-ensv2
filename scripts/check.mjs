@@ -14,7 +14,10 @@ import { SEPOLIA } from "../dist/lib/deployments.js";
 import { detectEnsV2, selfCheck } from "../dist/lib/ensv2.js";
 import { resolveQuery, resolverInfo, whois } from "../dist/lib/reads.js";
 import { buildDeployPlan, ownedResolverStatus } from "../dist/lib/resolver.js";
-import { checkAvailable, quoteRegistration, yearsToSeconds } from "../dist/lib/registrar.js";
+import {
+  ZERO_ADDRESS, ZERO_REFERRER, buildApprove, buildCommit, buildRegister, checkAvailable, computeCommitment,
+  makeSecret, quoteRegistration, tokenState, yearsToSeconds,
+} from "../dist/lib/registrar.js";
 
 const rpc = process.env.ETH_RPC_URL ?? "https://ethereum-sepolia-rpc.publicnode.com";
 const client = createPublicClient({ transport: http(rpc) });
@@ -62,6 +65,31 @@ try {
       // npm run check -- price <label> [years]
       const years = process.argv[4];
       show(await quoteRegistration(client, await gate(), need(arg, "label|name.eth"), yearsToSeconds(years)));
+      break;
+    }
+    case "register-plan": {
+      // npm run check -- register-plan <label> <owner> [years]
+      // Everything `ensv2 register` would do, up to but not including sending. Throwaway secret.
+      const d = await gate();
+      const owner = need(process.argv[4], "owner-address");
+      const avail = await checkAvailable(client, d, need(arg, "label"));
+      const res = await ownedResolverStatus(client, d, owner);
+      const duration = yearsToSeconds(process.argv[5]);
+      const quote = avail.available ? await quoteRegistration(client, d, avail.label, duration) : null;
+      const funds = await tokenState(client, d, owner);
+      const params = { label: avail.label, owner, secret: makeSecret(), subregistry: ZERO_ADDRESS, resolver: res.predicted, durationSeconds: duration, referrer: ZERO_REFERRER };
+      const commitment = await computeCommitment(client, d, params);
+      const [approve, commit, register] = [buildApprove(d, BigInt(quote?.total ?? 0)), buildCommit(d, commitment), buildRegister(d, params)];
+      let commitSim = "not simulated";
+      try { await client.call({ account: owner, to: commit.to, data: commit.data }); commitSim = "ok (eth_call from owner succeeds)"; } catch (e) { commitSim = "REVERTED: " + (e.shortMessage ?? e.message); }
+      show({
+        name: avail.name, available: avail.available,
+        resolver: { predicted: res.predicted, deployed: res.deployed, verified: res.verified },
+        quote: quote && { total: quote.formatted.total, symbol: quote.paymentToken.symbol, years: quote.durationYears },
+        funds: { balance: funds.balance.toString(), allowance: funds.allowance.toString(), sufficient: quote ? funds.balance >= BigInt(quote.total) : null },
+        commitment, commitSimulation: commitSim,
+        calldata: { approve: { to: approve.to, selector: approve.data.slice(0, 10), bytes: (approve.data.length - 2) / 2 }, commit: { to: commit.to, selector: commit.data.slice(0, 10), bytes: (commit.data.length - 2) / 2 }, register: { to: register.to, selector: register.data.slice(0, 10), bytes: (register.data.length - 2) / 2 } },
+      });
       break;
     }
     case "deploy-plan": {

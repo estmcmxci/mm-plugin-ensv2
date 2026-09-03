@@ -118,6 +118,36 @@
         ]
       },
       {
+        "id": "ensv2:faucet",
+        "capabilities": [
+          "wallet-read",
+          "wallet-submit"
+        ],
+        "dataAccess": [
+          "accounts",
+          "balances",
+          "network"
+        ],
+        "targetChains": [
+          11155111
+        ]
+      },
+      {
+        "id": "ensv2:register",
+        "capabilities": [
+          "wallet-read",
+          "wallet-submit"
+        ],
+        "dataAccess": [
+          "accounts",
+          "balances",
+          "network"
+        ],
+        "targetChains": [
+          11155111
+        ]
+      },
+      {
         "id": "ensv2:resolver:plan",
         "capabilities": [
           "wallet-read"
