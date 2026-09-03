@@ -18,9 +18,17 @@ mm ensv2 status              is this chain serving ENSv2, and does the deploymen
 mm ensv2 resolve <query>     name → address, or 0x address → primary name
 mm ensv2 whois <name>        status, expiry, owner, token id, registration epoch, resolver, subregistry
 mm ensv2 resolver <name>     which resolver answers for the name: its own, an ancestor's, or none
+mm ensv2 resolver plan       predict THIS WALLET's resolver address + show the deploy calldata (read-only)
+mm ensv2 resolver deploy     deploy this wallet's resolver, once (no-op if it exists) — signs via MetaMask policy
 ```
 
-All four run the same fail-closed gate first. `whois` and `resolver` locate the registry that actually holds the name (`UR.findParentRegistry`) rather than assuming the `.eth` registry — a subname's entry lives in its parent's subregistry, and reading the root for it returns a plausible-looking "AVAILABLE" for a name that is in fact registered.
+### Why `resolver deploy` exists
+
+ENSv2 replaces the single shared Public Resolver with **one `PermissionedResolver` proxy per account**. A freshly registered name has no resolver, resolves to nothing, and can hold no records until one is deployed and assigned. `deploy` provisions it through the `VerifiableFactory`: it predicts the CREATE2 address (salt derived from the wallet address, `proxyLogic` read from chain), no-ops if code already exists there, builds the `deployProxy(...)` calldata with the three-argument `initialize(admin, ALL_ROLES, [])`, hands `{to, data, value: 0}` to the wallet executor, waits for the receipt, then re-reads the chain and requires the factory to attest the proxy. The plugin never sees a key.
+
+Run `plan` first to see the address and the exact calldata. Deploying costs only gas.
+
+All commands run the same fail-closed gate first. `whois` and `resolver` locate the registry that actually holds the name (`UR.findParentRegistry`) rather than assuming the `.eth` registry — a subname's entry lives in its parent's subregistry, and reading the root for it returns a plausible-looking "AVAILABLE" for a name that is in fact registered.
 
 `whois` reports `owner` only while `REGISTERED` (`latestOwner` is stale after expiry) and surfaces the **registration epoch** alongside the token id: token ids change on any role grant or revoke, so `(registry, canonicalId, registrationEpoch)` is the anchor to key identity off, never the token id.
 

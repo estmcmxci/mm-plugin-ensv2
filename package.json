@@ -34,6 +34,9 @@
     "topics": {
       "ensv2": {
         "description": "ENSv2 names and agent identity (Sepolia)"
+      },
+      "ensv2:resolver": {
+        "description": "Inspect, predict, and deploy this wallet's ENSv2 resolver"
       }
     }
   },
@@ -89,6 +92,33 @@
         "targetChains": [
           11155111
         ]
+      },
+      {
+        "id": "ensv2:resolver:plan",
+        "capabilities": [
+          "wallet-read"
+        ],
+        "dataAccess": [
+          "accounts",
+          "network"
+        ],
+        "targetChains": [
+          11155111
+        ]
+      },
+      {
+        "id": "ensv2:resolver:deploy",
+        "capabilities": [
+          "wallet-read",
+          "wallet-submit"
+        ],
+        "dataAccess": [
+          "accounts",
+          "network"
+        ],
+        "targetChains": [
+          11155111
+        ]
       }
     ]
   },
@@ -99,6 +129,7 @@
     "viem": "^2.35.0"
   },
   "devDependencies": {
+    "@metamask/agent-sdk": "^6.2.0",
     "@metamask/agent-wallet": "^6.2.0",
     "oclif": "^4",
     "typescript": "^5"
