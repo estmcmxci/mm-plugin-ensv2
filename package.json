@@ -1,6 +1,6 @@
 {
   "name": "@estmcmxci/mm-plugin-ensv2",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "ENSv2 for the MetaMask Agent Wallet CLI (mm): fail-closed detection, resolution, and agent identity on Sepolia",
   "license": "MIT",
   "type": "module",
