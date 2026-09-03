@@ -33,6 +33,39 @@ export const verifiableFactoryAbi = parseAbi([
   "event ProxyDeployed(address indexed sender, address indexed proxyAddress, uint256 salt, address implementation)",
 ]);
 
+/** ETHRegistrar — signatures from deployments/sepolia/ETHRegistrar.json. Errors included so reverts decode by name. */
+export const ethRegistrarAbi = parseAbi([
+  "function isAvailable(string label) external view returns (bool)",
+  "function getRegisterPrice(string label, uint64 duration, address paymentToken) external view returns (uint256 base, uint256 premium)",
+  "function makeCommitment(string label, address owner, bytes32 secret, address subregistry, address resolver, uint64 duration, bytes32 referrer) external pure returns (bytes32)",
+  "function commit(bytes32 commitment) external",
+  "function commitmentAt(bytes32 commitment) external view returns (uint64 commitTime)",
+  "function register(string label, address owner, bytes32 secret, address subregistry, address resolver, uint64 duration, address paymentToken, bytes32 referrer) external returns (uint256 tokenId)",
+  "function MIN_REGISTER_DURATION() external view returns (uint64)",
+  "function MIN_COMMITMENT_AGE() external view returns (uint64)",
+  "function MAX_COMMITMENT_AGE() external view returns (uint64)",
+  "function BENEFICIARY() external view returns (address)",
+  "error CommitmentTooNew(bytes32 commitment, uint64 minimumCommitmentTime, uint64 currentTime)",
+  "error CommitmentTooOld(bytes32 commitment, uint64 maximumCommitmentTime, uint64 currentTime)",
+  "error DurationTooShort(uint64 duration, uint64 minDuration)",
+  "error InvalidOwner()",
+  "error NameNotAvailable(string label)",
+  "error UnexpiredCommitmentExists(bytes32 commitment)",
+]);
+
+/** StandardRentPriceOracle. */
+export const rentPriceOracleAbi = parseAbi(["function isPaymentToken(address paymentToken) external view returns (bool)"]);
+
+/** Minimal ERC-20, plus MockUSDC's open mint (Sepolia beta only). */
+export const erc20Abi = parseAbi([
+  "function balanceOf(address account) external view returns (uint256)",
+  "function decimals() external view returns (uint8)",
+  "function symbol() external view returns (string)",
+  "function allowance(address owner, address spender) external view returns (uint256)",
+  "function approve(address spender, uint256 value) external returns (bool)",
+  "function mint(address to, uint256 amount) external",
+]);
+
 /**
  * PermissionedResolver — the DEPLOYED generation. Three-argument initializer,
  * selector 0x7058b559, confirmed by bytecode presence on

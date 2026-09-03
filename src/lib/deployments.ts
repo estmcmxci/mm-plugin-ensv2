@@ -37,6 +37,7 @@ export type EnsV2Deployment = {
   /** The `.eth` PermissionedRegistry — where 2LDs live. */
   readonly registry: `0x${string}`;
   readonly registrar: `0x${string}`;
+  readonly rentPriceOracle: `0x${string}`;
   readonly paymentToken: `0x${string}`;
   readonly resolverFactory: `0x${string}`;
   readonly resolverImplementation: `0x${string}`;
@@ -50,6 +51,7 @@ export const SEPOLIA: EnsV2Deployment = {
   rootRegistry: "0x8115186E8f2E0B0281e86ab91f0f48Ba90364354",
   registry: "0xBDC85dD5b15D7ecb354cd7cb6f2c50b4f2c4F0E2",
   registrar: "0xa88553F454b77203B0D036A05c894d555EAAa2Cc",
+  rentPriceOracle: "0x8914b66260eb8c4fff795650c3ae8cd335958987",
   paymentToken: "0x768F42455A2D082E23ceeF7d51e5787C82d67a39",
   resolverFactory: "0x10dC6333CDFe1FCEf624c6e0a8221b91804Cd7ef",
   resolverImplementation: "0x9EAe5C2730a7dD16BDD1DeE6421a1B91e3B0365e",

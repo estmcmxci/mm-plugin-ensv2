@@ -94,6 +94,30 @@
         ]
       },
       {
+        "id": "ensv2:available",
+        "capabilities": [
+          "wallet-read"
+        ],
+        "dataAccess": [
+          "network"
+        ],
+        "targetChains": [
+          11155111
+        ]
+      },
+      {
+        "id": "ensv2:price",
+        "capabilities": [
+          "wallet-read"
+        ],
+        "dataAccess": [
+          "network"
+        ],
+        "targetChains": [
+          11155111
+        ]
+      },
+      {
         "id": "ensv2:resolver:plan",
         "capabilities": [
           "wallet-read"

@@ -18,6 +18,8 @@ mm ensv2 status              is this chain serving ENSv2, and does the deploymen
 mm ensv2 resolve <query>     name → address, or 0x address → primary name
 mm ensv2 whois <name>        status, expiry, owner, token id, registration epoch, resolver, subregistry
 mm ensv2 resolver <name>     which resolver answers for the name: its own, an ancestor's, or none
+mm ensv2 available <name>    can this .eth label be registered? (asks the registrar; accounts for grace + v1 reservations)
+mm ensv2 price <name>        ERC-20 cost to register, quoted by the registrar (--years n, default 1)
 mm ensv2 resolver plan       predict THIS WALLET's resolver address + show the deploy calldata (read-only)
 mm ensv2 resolver deploy     deploy this wallet's resolver, once (no-op if it exists) — signs via MetaMask policy
 ```

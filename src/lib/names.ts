@@ -44,3 +44,21 @@ export function dnsDecode(bytes: Uint8Array, offset = 0): string {
 export function leafLabel(name: string): string {
   return name.split(".")[0]!;
 }
+
+/**
+ * The registrable label of a 2LD .eth name. Accepts "name" or "name.eth".
+ * The ETHRegistrar registers labels directly under .eth only; subnames go
+ * through the parent's subregistry instead. Labels shorter than 3 characters
+ * are rejected by the registrar.
+ */
+export function ethLabel(input: string): string {
+  const n = normalize(input.trim());
+  const parts = n.split(".");
+  let label: string;
+  if (parts.length === 1) label = parts[0]!;
+  else if (parts.length === 2 && parts[1] === "eth") label = parts[0]!;
+  else throw new Error(`"${input}" is not a 2LD .eth name; the registrar only registers <label>.eth`);
+  if (!label) throw new Error("empty label");
+  if (label.length < 3) throw new Error(`"${label}.eth" is too short; the registrar requires at least 3 characters`);
+  return label;
+}

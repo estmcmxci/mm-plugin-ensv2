@@ -14,6 +14,7 @@ import { SEPOLIA } from "../dist/lib/deployments.js";
 import { detectEnsV2, selfCheck } from "../dist/lib/ensv2.js";
 import { resolveQuery, resolverInfo, whois } from "../dist/lib/reads.js";
 import { buildDeployPlan, ownedResolverStatus } from "../dist/lib/resolver.js";
+import { checkAvailable, quoteRegistration, yearsToSeconds } from "../dist/lib/registrar.js";
 
 const rpc = process.env.ETH_RPC_URL ?? "https://ethereum-sepolia-rpc.publicnode.com";
 const client = createPublicClient({ transport: http(rpc) });
@@ -54,6 +55,15 @@ try {
       // Where would <owner>'s resolver be, and does it exist? Read-only.
       show(await ownedResolverStatus(client, await gate(), need(arg, "owner-address")));
       break;
+    case "available":
+      show(await checkAvailable(client, await gate(), need(arg, "label|name.eth")));
+      break;
+    case "price": {
+      // npm run check -- price <label> [years]
+      const years = process.argv[4];
+      show(await quoteRegistration(client, await gate(), need(arg, "label|name.eth"), yearsToSeconds(years)));
+      break;
+    }
     case "deploy-plan": {
       // The exact calldata `ensv2 resolver deploy` would hand to the wallet. Nothing is sent.
       const d = await gate();
