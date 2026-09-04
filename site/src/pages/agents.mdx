@@ -1,0 +1,67 @@
+---
+title: "For agents"
+description: "How an AI agent should read these docs and drive the plugin: machine-readable pages, the JSON contract, preconditions per step, and what never to do."
+---
+
+# For agents
+
+You are probably an agent reading this. Good. Here is the contract.
+
+## Reading this site
+
+- Any page is available as Markdown by appending `.md` to its URL. The home page is `/index.md`.
+- [`/llms.txt`](/llms.txt) indexes every page. [`/llms-full.txt`](/llms-full.txt) is the whole site in one file.
+- The [command reference](/reference/commands) and [error codes](/reference/errors) are generated from the plugin's own manifest and source at each release. They do not drift.
+
+## The output contract
+
+Every command accepts `--json`. The host wraps the result:
+
+```json
+{ "ok": true,  "data": { ... } }
+{ "ok": false, "error": { "code": "ENSV2_PRIMARY_FORWARD_MISMATCH", "message": "...", "hint": "..." } }
+```
+
+`error.hint` always names the next action. Read it before deciding anything.
+
+## The sequence, with preconditions
+
+| Step | Command | Precondition | Postcondition to verify |
+|---|---|---|---|
+| 0 | `mm ensv2 status --json` | — | `data.isV2 === true`, every `checks[].ok` |
+| 1 | `mm ensv2 resolver deploy --json` | wallet has Sepolia ETH | `data.verified === true` |
+| 2 | `mm ensv2 available NAME.eth --json` | — | `data.available === true` |
+| 3 | `mm ensv2 faucet --json` | Sepolia only | `data.balanceAfter >= price` |
+| 4 | `mm ensv2 register NAME.eth --json` | steps 1–3 | `data.status === "REGISTERED"`, `data.resolverBound` |
+| 5 | `mm ensv2 agent register NAME.eth --uri URI --json` | step 4; URI serves a registration file | `data.verified.bindingMatches && data.verified.ownerIsController` |
+| 6 | `mm ensv2 records set NAME.eth ... --link-agent ID --json` | step 5 | `data.verified === true` |
+| 7 | `mm ensv2 primary set NAME.eth --json` | step 6 wrote `addr` to this wallet | `data.verified === true` |
+
+Or run steps 1–6 as one job with `mm ensv2 provision NAME ... --json` and inspect `mm ensv2 jobs show JOBID --json`.
+
+## Rules
+
+1. **Never retry a write because a call failed.** A failed call is not a failed transaction. `register` and `provision` checkpoint before they send; run the *same* command again and they re-derive state from chain. If you see `E_RECEIPT_UNAVAILABLE` or `ENSV2_*_UNVERIFIED`, read `mm ensv2 jobs show` or `whois` before anything else.
+2. **Every write is preceded by a plan you can inspect.** `resolver plan`, `provision --dry-run`, `records get`, `primary get`. Use them.
+3. **Idempotent by design.** Re-running any command with the same inputs sends nothing when the chain already matches. You can always re-run to check.
+4. **Mainnet is refused.** Do not try to work around `ENSV2_UNSUPPORTED_CHAIN`.
+5. **The commit secret is private.** It lives in a 0600 file under `~/.mm-plugin-ensv2/`. Do not read it, print it, or move it.
+
+## Identity records you will write and read
+
+- ENSIP-25 link: key `agent-registration[<ERC-7930 registry>][<agentId>]`, value `"1"`. On Sepolia the registry is `0x0001000003aa36a7148004a818bfb912233c491871b3d84c89a494bd9e`. `mm ensv2 agent info` prints the exact key.
+- ENSIP-26 discovery: `agent-context` (free text, Markdown is fine) and `agent-endpoint[web|mcp|a2a]`.
+- The ERC-8004 registration file your `agentURI` should serve: see [the format](/explainer/identity#the-registration-file). Two live examples: [`/agents/10058.json`](/agents/10058.json), [`/agents/10059.json`](/agents/10059.json).
+
+## Verify independently
+
+Do not trust the plugin's word. Read through the Universal Resolver at `0xeEeEEEeE14D718C2B47D9923Deab1335E144EeEe` with any client, or with `cast`:
+
+```sh
+RPC=https://ethereum-sepolia-rpc.publicnode.com
+UR=0xeEeEEEeE14D718C2B47D9923Deab1335E144EeEe
+# DNS-encode the name (length-prefixed labels, zero terminator)
+DNS=$(python3 -c "n='NAME.eth';print('0x'+''.join(f'{len(l):02x}'+l.encode().hex() for l in n.split('.'))+'00')")
+cast call $UR "findResolver(bytes)(address,bytes32,uint256)" $DNS --rpc-url $RPC
+cast call $UR "reverse(bytes,uint256)(string,address,address)" 0xYourAddress 60 --rpc-url $RPC
+```

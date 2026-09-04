@@ -1,0 +1,38 @@
+/* estmcmxci.co palette + type, threaded into Vocs' own tokens.
+   Light: cool grays (g0–g9). Dark: warm grays (dark-g0–g9). Same values as the root site. */
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+
+:root {
+  --g0: #f4f6f7; --g1: #e9edee; --g2: #eef1f2; --g3: #cfd6d8; --g5: #9aa3a6; --g6: #6b7477; --g7: #3f4649; --g8: #1c2123; --g9: #14191b;
+
+  --vocs-font-family: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+  --vocs-font-family-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --vocs-background-color-primary: var(--g1);
+  --vocs-background-color-surface: var(--g0);
+  --vocs-background-color-code-block: var(--g0);
+  --vocs-background-color-inline-code: var(--g2);
+  --vocs-background-color-blockquote: var(--g2);
+  --vocs-text-color-primary: var(--g9);
+  --vocs-text-color-heading: var(--g9);
+  --vocs-text-color-secondary: var(--g7);
+  --vocs-text-color-muted: var(--g6);
+  --vocs-text-color-link: var(--g8);
+  --vocs-border-color-primary: var(--g3);
+  --vocs-border-color-secondary: var(--g2);
+}
+
+:root[style*='color-scheme:dark'],
+:root[style*='color-scheme: dark'] {
+  --g0: #1c1713; --g1: #17130f; --g2: #1a1511; --g3: #2f271f; --g5: #6f6354; --g6: #968877; --g7: #baa994; --g8: #ddcdb6; --g9: #f2e7d6;
+  --vocs-text-color-link: var(--g8);
+}
+
+/* The mark is text in an SVG; give it room. */
+img[alt='𝔪✶ estmcmxci'] { height: 28px; width: auto; }
+
+/* Evidence tables carry long hashes: let them scroll, never wrap the page. */
+table { display: block; overflow-x: auto; max-width: 100%; }
+
+/* Hashes and addresses in table cells stay on one line; the table scrolls instead. */
+td code, td a code { white-space: nowrap; }

@@ -1,0 +1,34 @@
+---
+title: "Your wallet's resolver"
+description: "Why every ENSv2 owner deploys their own resolver, how the plugin predicts its address before it exists, and how the factory proves what it runs."
+---
+
+# Your wallet's resolver
+
+On ENSv1 you pointed your name at a shared Public Resolver and wrote records into it. ENSv2's model is that **each account deploys its own resolver**: a tiny ERC-1167 proxy over the audited `PermissionedResolver` implementation, created by the `VerifiableFactory`. You own the contract that holds your records, and the factory can attest at any time which implementation it runs.
+
+The plugin deploys one per wallet, once, and reuses it forever.
+
+## Predicted before it exists
+
+The factory uses CREATE2, so the address is a pure function of the deployer and a salt:
+
+```
+salt      = keccak256(abi.encode(keccak256("OwnedResolver"), owner, 0))
+outerSalt = keccak256(abi.encode(deployer, salt))
+address   = CREATE2(factory, outerSalt, ERC-1167 minimal proxy over proxyLogic)
+```
+
+`deployer` must equal `owner` for the prediction to hold, which is why the transaction is sent from the wallet itself. `mm ensv2 resolver plan` prints the predicted address, the salt, and the exact calldata without sending anything. That predictability is what lets `register` bind the resolver into a name's commitment before the name exists.
+
+## Initialized in the same transaction
+
+The factory call carries the initializer: `initialize(address admin, uint256 roleBitmap, bytes[] calls)`, with your wallet as admin and every role granted. This is the three-argument form the deployed implementation actually has; the ENS contracts source tree shows a different signature, which is one of the reasons the plugin was built from deployment artifacts.
+
+## Verified, not assumed
+
+After the receipt, the plugin reads the chain again: code must exist at the predicted address, and `VerifiableFactory.verifyContract(proxy)` must return the expected implementation. If either fails, the command errors even though the transaction succeeded. The factory's `verifyContract` signature in the ENS docs was wrong when this was built; the correction was contributed upstream as [ensdomains/docs#588](https://github.com/ensdomains/docs/pull/588).
+
+## Cost and idempotency
+
+176,703 gas, identical on both wallets in the [evidence](/evidence). A second `deploy` reads the chain, finds the proxy, re-verifies it, and sends nothing.

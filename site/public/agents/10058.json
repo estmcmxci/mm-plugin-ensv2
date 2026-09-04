@@ -1,0 +1,26 @@
+{
+  "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
+  "name": "grilledcheese.eth",
+  "description": "ENSv2 agent wallet on Sepolia",
+  "image": "https://estmcmxci.co/favicon.svg",
+  "services": [
+    {
+      "name": "web",
+      "endpoint": "https://estmcmxci.co"
+    }
+  ],
+  "x402Support": false,
+  "active": true,
+  "registrations": [
+    {
+      "agentId": 10058,
+      "agentRegistry": "eip155:11155111:0x8004A818BFB912233c491871b3d84c89A494BD9e"
+    }
+  ],
+  "ens": {
+    "name": "grilledcheese.eth",
+    "chainId": 11155111,
+    "owner": "0x0943142F488fb694141841bF46e17Be2bB5C7EE1",
+    "ensip25": "agent-registration[0x0001000003aa36a7148004a818bfb912233c491871b3d84c89a494bd9e][10058]"
+  }
+}

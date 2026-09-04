@@ -1,0 +1,52 @@
+# Docs site: build and deploy site/ to Cloudflare Pages (project mm-plugin-ensv2,
+# https://mm-ensv2.estmcmxci.co) on every push to main that touches it.
+# Pull requests only build. The reference pages are regenerated from this
+# package's own manifest and source first, so the site can never drift from the CLI.
+name: site
+
+on:
+  push:
+    branches: [main]
+    paths: ['site/**', 'src/**', 'package.json', '.github/workflows/site.yml']
+  pull_request:
+    paths: ['site/**', '.github/workflows/site.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: site-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  site:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # The plugin itself: dist/ and oclif.manifest.json feed the generator.
+      - name: Build the plugin
+        run: npm install --no-fund --no-audit && npm run build
+
+      - name: Regenerate reference pages from the manifest and source
+        working-directory: site
+        run: npm install --no-fund --no-audit && npm run generate
+
+      - name: Fail if the committed reference pages are stale
+        run: git diff --exit-code -- site/src/pages/reference || (echo "::error::site/src/pages/reference is out of date — run 'cd site && npm run generate' and commit" && exit 1)
+
+      - name: Build the site
+        working-directory: site
+        env:
+          SITE_URL: https://mm-ensv2.estmcmxci.co
+        run: npm run build
+
+      - name: Deploy to Cloudflare Pages
+        if: github.event_name != 'pull_request'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy site/dist/public --project-name=mm-plugin-ensv2 --branch=main

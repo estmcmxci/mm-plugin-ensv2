@@ -1,0 +1,32 @@
+---
+title: "Primary names"
+description: "Reverse resolution on ENSv2 Sepolia is still v1 infrastructure at launch; how the plugin derives the registrar from the v2 root and refuses to write anywhere else."
+---
+
+# Primary names
+
+Forward resolution (`name → address`) lives on your resolver. The reverse direction (`address → name`) lives in a separate namespace, `addr.reverse`, and a name is only *primary* when both directions agree.
+
+## At launch, the reverse namespace is v1
+
+The ENS documentation is explicit: at ENSv2 launch, `addr.reverse` and `default.reverse` stay on v1 infrastructure. The v2 root registry binds the `reverse` TLD to an `ENSV1Resolver` that mirrors the v1 registry, and the Universal Resolver's `reverse(address, 60)` reads through it. So the write is the **v1 `ReverseRegistrar.setName(name)`**, sent by the address itself, in one transaction. That is what the official `ens-cli` does too.
+
+## Derived, never trusted
+
+`mm ensv2 primary set NAME.eth` does not take the registrar's address from its table. On every call it walks the chain:
+
+```
+root.getResolver("reverse") → ENSV1Resolver.REGISTRY_V1() → v1Registry.owner(namehash("addr.reverse"))
+```
+
+and refuses unless the result equals the pinned `0xA0a1AbcDAe1a2a4A2EF8e9113Ff0e02DD81DC0C6`, which was itself derived two independent ways: from the pinned v2 deployment's `ReverseRegistrarAdapter.REVERSE_REGISTRAR()`, and from the v1 registry's owner of `addr.reverse`. When ENS migrates the reverse namespace to its planned per-chain `L2ReverseRegistrar`, this derivation stops matching and the command fails closed instead of writing to the wrong contract.
+
+## Refused unless it round-trips
+
+A reverse record that does not forward-resolve to the same address is ignored by every resolver. So `primary set` first checks that the name resolves to this wallet through the Universal Resolver, and errors with `ENSV2_PRIMARY_FORWARD_MISMATCH` otherwise, pointing you at `records set`. After the transaction it verifies `UR.reverse(you, 60) == NAME.eth`. A second run is a no-op.
+
+## Two layers in `primary get`
+
+`rawName` and `v1Resolver` are what the reverse record literally says. `primaryName` is what the Universal Resolver returns, non-null only when the round-trip holds. `mm ensv2 resolve 0xYourAddress` returns the same verified answer.
+
+Both wallets in the [evidence](/evidence) set theirs: about 114k gas each.

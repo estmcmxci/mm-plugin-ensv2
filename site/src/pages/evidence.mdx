@@ -1,0 +1,52 @@
+---
+title: "Live on Sepolia"
+description: "Two wallets, two names, two agents. Every transaction, block and gas figure, and how each claim was checked independently of the plugin."
+---
+
+# Live on Sepolia
+
+Everything below was executed from a MetaMask Agent Wallet with MFA on every write and then checked independently with `cast` against a public RPC: receipts, decoded calldata, contract reads, and Universal Resolver `resolve()` and `reverse()` calls. Recipe on the [design](/reference/design#verify-it-yourself) page.
+
+## Wallet A — `grilledcheese.eth`, agent #10058
+
+Owner `0x0943142F488fb694141841bF46e17Be2bB5C7EE1`, resolver `0xeda43c6884FD83bbb7774F2e27B6e2d6fb97D282`. Built rung by rung, 2026-09-03.
+
+| Step | Tx | Gas | Checked |
+|---|---|---|---|
+| resolver deploy | [`0x23c4f73b…560f4ccf`](https://sepolia.etherscan.io/tx/0x23c4f73bd438ca597e60cd07c2bfb9d1c1cec92eb42e6b6e18fc2873560f4ccf) | 176,703 | predicted == deployed; `verifyContract` → implementation |
+| faucet | [`0x95be59dd…0683a44e`](https://sepolia.etherscan.io/tx/0x95be59dd6d80420de63c93ae6d43816f1152feef43f47ccc43e4c6750683a44e) | 51,368 | 100 USDC |
+| commit | [`0x53fc053b…1d459c83`](https://sepolia.etherscan.io/tx/0x53fc053b76d1b911a6513a806c7aa04c81c2785d376bcb55ff6256691d459c83) | 45,433 | commitment present |
+| approve | [`0x9db60768…1df2220a`](https://sepolia.etherscan.io/tx/0x9db60768df5524a593249ddc01016a749758cbb69ab50269bec0c4c81df2220a) | 46,353 | allowance = quote |
+| register | [`0xe8c5c2ca…d75ccc70`](https://sepolia.etherscan.io/tx/0xe8c5c2ca90540a06f01bc977c0d52d68365c770b1e0604e7bfab134ad75ccc70) | 217,363 | `REGISTERED`, 8.000021 USDC, expires 2027-09-03, resolver bound |
+| agent register | [`0x3586236c…ba48d3dd`](https://sepolia.etherscan.io/tx/0x3586236ca8af854a134df4f9d8063ec1aac98480740853e55a003df9ba48d3dd) | 204,786 | agent **#10058**, controller = owner, NFT held by adapter |
+| records set | [`0x4a0d95c7…97da660`](https://sepolia.etherscan.io/tx/0x4a0d95c7fc914b14c66a82b1b4da15953488ad8cd02c6b58f4118799397da660) | 400,890 | block 11630151; `multicall` with exactly 6 inner calls; all read back via UR |
+| primary set | [`0x780faf45…2d31f4c4`](https://sepolia.etherscan.io/tx/0x780faf4566c9bd65d26e0696c1c46c7dd12b2ae86f388c4f4c942e6a2d31f4c4) | 113,961 | block 11630546; `UR.reverse` → `grilledcheese.eth` |
+
+## Wallet B — `sesquipedalian.eth`, agent #10059
+
+A wallet created for the purpose, funded with 0.004 ETH, run 2026-09-04 as the publish gate for the shipped plugin. Owner `0x9bFF63174618a7660C566ef4B5D6bf484fa5034b`, resolver `0x94a26d24EEa517f2722F9786967729BEEb7227af`.
+
+| Step | Tx | Block | Gas | Checked |
+|---|---|---|---|---|
+| fund from A | [`0x73405e85…bffa2777b`](https://sepolia.etherscan.io/tx/0x73405e851c463433549bf311cfaf36844d037125d1a5de66659bb78bffa2777b) | 11630320 | — | balance 0.004 ETH |
+| resolver deploy | [`0x34d4226e…0eaaa3e64`](https://sepolia.etherscan.io/tx/0x34d4226ebf16abf710ea7373092077949f6871be92ca045781427230eaaa3e64) | 11630334 | 176,703 | `ProxyDeployed` names B and the predicted salt; second run sent nothing |
+| faucet | [`0x7dd1b630…8f7c162d7`](https://sepolia.etherscan.io/tx/0x7dd1b63055d4b50fd318d399b1df8da9a81cd964c45f48acb87736d8f7c162d7) | 11630345 | 51,368 | `balanceOf` = 100 USDC |
+| commit | [`0x0bf6d5dc…70ec86ccc`](https://sepolia.etherscan.io/tx/0x0bf6d5dc2c53618826d200dc8932439460d7060340166ebf842fc1c70ec86ccc) | 11630353 | 45,433 | — |
+| approve | [`0x31312ec5…2a03d567c`](https://sepolia.etherscan.io/tx/0x31312ec5f6a641cfc2fec665a90aee908bb077a3041d9308271c0c02a03d567c) | 11630356 | 46,353 | allowance exactly 8,000,021 |
+| *network drop* | | | | the machine lost connectivity after approve; the plugin failed closed; checkpoint intact |
+| register (resumed) | [`0x35bf0ac8…a45f4acac`](https://sepolia.etherscan.io/tx/0x35bf0ac83bbe43671206f814927525edadaebaf069731ca57cff74da45f4acac) | 11630408 | 217,676 | **no second commit, no second approve**; `ownerOf` = B; USDC 100 → 91.999979 |
+| agent register | [`0x4892ce9d…d1a2bedd`](https://sepolia.etherscan.io/tx/0x4892ce9d30134d561c61ba61da24559700eed2fb4f596cb310fdad20d1a2bedd) | 11630422 | 204,798 | agent **#10059**; `isController(10059, B)` true |
+| records set | [`0x0c7e042d…7650b2e17`](https://sepolia.etherscan.io/tx/0x0c7e042dc52fa45e03cde0bf56ff186d36568b3b8c9e8147c7bcfc77650b2e17) | 11630456 | 400,686 | 6 inner calls on the name's node; each value byte-identical via `UR.resolve`; rerun → 0 calls |
+| primary set | [`0xd7353860…6182a0dee`](https://sepolia.etherscan.io/tx/0xd7353860dae12acb36417fe3a8b20d59b45fcf01e1cc4ff2b1bd0e66182a0dee) | 11630540 | 113,973 | `UR.reverse` → `sesquipedalian.eth` |
+
+Cold-wallet total: 8 writes, about 1.26M gas, roughly 0.0013 ETH at 1 gwei, 8.000021 USDC.
+
+## What the run proved
+
+- Detection refuses mainnet and confirms Sepolia ENSv2 on every command.
+- A resolver's address is predicted correctly before deployment and attested after.
+- Registration lands with the resolver bound, and a real interruption resumed without a duplicate payment.
+- An agent is minted and bound in one transaction, and the name's ENSIP-25 link makes it findable.
+- Both directions of resolution hold for both wallets.
+
+The full run log with every command's output is kept in the program repository's runbook.

@@ -1,0 +1,29 @@
+{
+  "name": "mm-plugin-ensv2-site",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Docs and explainer for @estmcmxci/mm-plugin-ensv2 \u2014 ENSv2 names and ERC-8004 agent identity for the MetaMask Agent Wallet CLI",
+  "scripts": {
+    "generate": "node scripts/generate.mjs",
+    "dev": "vocs dev",
+    "build": "vocs build && node scripts/postbuild.mjs",
+    "preview": "vocs preview",
+    "audit:markdown": "vocs markdown-audit",
+    "deploy": "npx wrangler pages deploy dist/public --project-name mm-plugin-ensv2"
+  },
+  "dependencies": {
+    "react": "^19",
+    "react-dom": "^19",
+    "vocs": "^2.8.5",
+    "waku": "1.0.0-beta.6"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^6",
+    "typescript": "^5",
+    "vite": "^8"
+  }
+}
