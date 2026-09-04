@@ -1,0 +1,27 @@
+---
+title: "Registering a name"
+description: "Commit and reveal with an ERC-20 payment, the private checkpoint that makes it resumable, and the network drop that proved it."
+---
+
+# Registering a name
+
+`mm ensv2 register NAME.eth` runs four transactions and one wait, and it is safe to interrupt at any point.
+
+## The sequence
+
+1. **Gate and preflight.** ENSv2 detection, label availability (the registrar's `isAvailable`, which accounts for grace periods and v1 reservations), and your resolver must exist and be factory-verified, because its address is bound into the commitment.
+2. **Quote.** From the registrar, not from local math: it folds in premium decay and reverts by name (`NameNotAvailable`, `DurationTooShort`) if something is off. Your USDC balance must cover it, or the error points you at `faucet`.
+3. **Checkpoint, then commit.** The full tuple `(label, owner, secret, subregistry, resolver, duration, referrer)` is written to `~/.mm-plugin-ensv2/pending-registrations.json` with mode 0600 **before** the commit transaction is sent. The commitment hash comes from the registrar's own pure `makeCommitment`. The secret is not a key and cannot move funds, but it is the only thing that lets a commitment be completed, so it is never printed.
+4. **Approve, overlapped with the wait.** The ERC-20 allowance is raised if short, while the plugin waits on **chain time** until `commit + 60 s`. It refuses to reveal after 24 hours.
+5. **Register.** One call pays the registrar in USDC, mints the name to you, and sets your resolver.
+6. **Verify.** The registry must report `REGISTERED` to you, and the Universal Resolver's `findResolver` must return your resolver at offset 0. Only then is the checkpoint cleared.
+
+## Resume
+
+Run the same command again after any interruption and it resumes with the **same** commitment. It never commits twice. An expired commitment is re-committed with the same parameters.
+
+This was not tested by pressing Ctrl-C. During the fresh-wallet run in the [evidence](/evidence), the machine lost its network between the approve transaction being submitted and the plugin polling its result. The plugin stopped with a network error rather than guessing. Both transactions had landed. The rerun read the checkpoint, checked the commitment's age on chain, saw the allowance already covered the price, and sent only the register call: `resumedCommitment: true`, `approve: null`, exactly one new transaction.
+
+## What `whois` shows afterwards
+
+Status, expiry, owner, the token id, the canonical id, the registration epoch, the resolver and the subregistry, all read through the registry the Universal Resolver says holds the name. Owner is reported only while `REGISTERED`: the registry's `latestOwner` is stale after expiry and the plugin does not repeat it.

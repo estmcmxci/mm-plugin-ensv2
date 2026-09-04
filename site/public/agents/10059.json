@@ -1,0 +1,26 @@
+{
+  "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
+  "name": "sesquipedalian.eth",
+  "description": "ENSv2 e2e on Sepolia",
+  "image": "https://estmcmxci.co/favicon.svg",
+  "services": [
+    {
+      "name": "web",
+      "endpoint": "https://estmcmxci.co"
+    }
+  ],
+  "x402Support": false,
+  "active": true,
+  "registrations": [
+    {
+      "agentId": 10059,
+      "agentRegistry": "eip155:11155111:0x8004A818BFB912233c491871b3d84c89A494BD9e"
+    }
+  ],
+  "ens": {
+    "name": "sesquipedalian.eth",
+    "chainId": 11155111,
+    "owner": "0x9bFF63174618a7660C566ef4B5D6bf484fa5034b",
+    "ensip25": "agent-registration[0x0001000003aa36a7148004a818bfb912233c491871b3d84c89a494bd9e][10059]"
+  }
+}

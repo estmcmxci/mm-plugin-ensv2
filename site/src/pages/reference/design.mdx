@@ -1,0 +1,53 @@
+---
+title: "Design — fail closed"
+description: "The invariants every command obeys, where addresses come from, what the plugin never does, and a recipe to verify any claim it makes without trusting it."
+---
+
+# Design: fail closed
+
+## Invariants
+
+1. **Native.** A plugin in the CLI's own process. No Python, no skill runtime, no wrapper. Discoverable in `mm help`.
+2. **Key-less.** The plugin never sees a key. Every write is `{to, data, value}` handed to the host's wallet executor, which signs under MetaMask policy with MFA. The session, CLI token and recovery phrase are host-only.
+3. **Sepolia only, and only if it is really ENSv2.** Five independent checks before any command; mainnet is not configured and cannot be enabled by flag.
+4. **No hand-copied addresses.** Every address in the [deployment table](/reference/deployment) has a recorded provenance, and the ones that can be re-derived on chain are: the `.eth` registry from the Universal Resolver, the factory clone target from the factory, the adapter implementation from its EIP-1967 slot, the reverse registrar from the v2 root.
+5. **Verify after every write, through the Universal Resolver.** A transaction receipt is not success. The command reads the chain again the way a stranger would and errors if the state is not what it should be.
+6. **Idempotent.** Every command with the same inputs sends nothing when the chain already matches.
+7. **Secrets stay on disk, mode 0600, never printed.** The commit secret and job files.
+8. **Additive releases.** Commands proven live keep their behavior and output shape; new capability arrives as new commands.
+
+## Verify it yourself
+
+Any claim on the [evidence](/evidence) page can be checked with `cast` against a public RPC.
+
+```sh
+RPC=https://ethereum-sepolia-rpc.publicnode.com
+UR=0xeEeEEEeE14D718C2B47D9923Deab1335E144EeEe
+
+# Did the records tx do exactly what it says? Decode the multicall.
+cast tx 0x0c7e042dc52fa45e03cde0bf56ff186d36568b3b8c9e8147c7bcfc77650b2e17 input --rpc-url $RPC \
+  | xargs cast calldata-decode "multicall(bytes[])"
+
+# What does a stranger read for the name? (node = namehash, key = any text record)
+NODE=$(cast namehash sesquipedalian.eth)
+DNS=$(python3 -c "n='sesquipedalian.eth';print('0x'+''.join(f'{len(l):02x}'+l.encode().hex() for l in n.split('.'))+'00')")
+cast call $UR "resolve(bytes,bytes)(bytes,address)" $DNS $(cast calldata "text(bytes32,string)" $NODE description) --rpc-url $RPC
+
+# Is the resolver what the factory says it is?
+cast call 0x10dC6333CDFe1FCEf624c6e0a8221b91804Cd7ef "verifyContract(address)(address)" 0x94a26d24EEa517f2722F9786967729BEEb7227af --rpc-url $RPC
+
+# Is the agent bound, and who controls it?
+cast call 0x7621630cB63a73a194f45A3E6801B8C6A7eC2f92 "bindingOf(uint256)(uint8,address,uint256)" 10059 --rpc-url $RPC
+cast call 0x7621630cB63a73a194f45A3E6801B8C6A7eC2f92 "isController(uint256,address)(bool)" 10059 0x9bFF63174618a7660C566ef4B5D6bf484fa5034b --rpc-url $RPC
+
+# Does the wallet resolve back to its name?
+cast call $UR "reverse(bytes,uint256)(string,address,address)" 0x9bFF63174618a7660C566ef4B5D6bf484fa5034b 60 --rpc-url $RPC
+```
+
+## What the plugin never does
+
+- Retry a paid or irreversible transaction on its own when the outcome is unknown.
+- Write a record it could not read first (an unreadable record is never overwritten).
+- Bind an agent to a name whose current token id differs from the one it just read.
+- Set a primary name that does not forward-resolve to the wallet.
+- Fall back to ENSv1 behavior, silently or otherwise.

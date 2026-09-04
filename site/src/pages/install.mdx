@@ -1,0 +1,68 @@
+---
+title: "Install"
+description: "Install the plugin into the MetaMask Agent Wallet CLI from npm or from a packed tarball, and the two host quirks to know about."
+---
+
+# Install
+
+## Prerequisites
+
+- MetaMask Agent Wallet CLI **6.2.0 or later** (`mm --version`). The plugin system shipped in 6.2.0 and is still flagged experimental.
+- Node 20 or later.
+- A wallet in `mm` with a little Sepolia ETH. A full provisioning run costs about 1.2M gas, which at Sepolia's usual 1 gwei is around 0.0012 ETH. The name itself is paid in test USDC from an open faucet.
+
+## From npm
+
+```sh
+mm config set experimentalPlugins true
+mm plugins install @estmcmxci/mm-plugin-ensv2 --accept-permissions
+mm ensv2 status
+```
+
+`--accept-permissions` consents to the capabilities the plugin declares: `wallet-read` for every command, `wallet-submit` only for the commands that send a transaction. The consent screen lists them per command.
+
+## From a tarball
+
+Useful for a branch build. Install the **packed tarball**, never the directory: a directory install symlinks the plugin, and its own copy of `@metamask/agent-wallet` then shadows the running CLI.
+
+```sh
+git clone https://github.com/estmcmxci/mm-plugin-ensv2 && cd mm-plugin-ensv2
+npm install && npm run build && npm pack
+mm plugins install file:$PWD/estmcmxci-mm-plugin-ensv2-<version>.tgz --accept-permissions
+```
+
+## Two host quirks
+
+:::warning[Upgrade means uninstall first]
+Agent Wallet 6.2.0 does not refresh a plugin's consent record when a new version is installed over an approved one, so new commands stay unapproved. Uninstall, then install.
+```sh
+mm plugins uninstall @estmcmxci/mm-plugin-ensv2
+mm plugins install @estmcmxci/mm-plugin-ensv2 --accept-permissions
+```
+:::
+
+:::tip[npm stalls over IPv6]
+On some networks the host's bundled npm hangs on an IPv6 socket during install or uninstall. Prefix the command:
+```sh
+NODE_OPTIONS=--dns-result-order=ipv4first mm plugins install @estmcmxci/mm-plugin-ensv2 --accept-permissions
+```
+:::
+
+## Verify
+
+```sh
+mm ensv2 status
+```
+
+Expect `isV2: true` and five passing checks against the Sepolia deployment. Then try `mm ensv2 status --chain 1`: it must refuse. That refusal is the plugin's first invariant.
+
+## Without the wallet
+
+Every read and every transaction plan can be exercised against a public RPC with no wallet at all, from a checkout:
+
+```sh
+npm run check                                  # the five fail-closed checks
+npm run check -- whois grilledcheese.eth
+npm run check -- primary 0x0943142F488fb694141841bF46e17Be2bB5C7EE1
+npm run check -- provision-plan mylabel 0xYourAddress https://example.com/agent.json
+```

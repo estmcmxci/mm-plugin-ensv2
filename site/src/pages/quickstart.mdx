@@ -1,0 +1,91 @@
+---
+title: "Quickstart"
+description: "From an empty wallet to a name that resolves both ways with a bound ERC-8004 agent, step by step, with what each step should print."
+---
+
+# Quickstart
+
+This is the exact sequence that was run on a fresh wallet for the [evidence](/evidence) page. Seven transactions, seven MetaMask approvals, about ten minutes. Replace `NAME` with a label nobody has registered.
+
+::::steps
+
+### Gate
+
+```sh
+mm ensv2 status
+mm ensv2 status --chain 1
+```
+
+Sepolia: `isV2: true`, 5/5 checks. Mainnet: refused with `ENSV2_UNSUPPORTED_CHAIN`.
+
+### Your resolver
+
+```sh
+mm ensv2 resolver plan      # predicts the address, sends nothing
+mm ensv2 resolver deploy    # one tx, ~177k gas
+mm ensv2 resolver deploy    # again: "already deployed — nothing to do"
+```
+
+`plan` predicts the address from your wallet with CREATE2. `deploy` sends the factory call and refuses to return until the factory attests the proxy runs the expected implementation. The second run sends nothing. Read [why you need one](/explainer/resolver).
+
+### Name, price, funds
+
+```sh
+mm ensv2 available NAME.eth
+mm ensv2 price NAME.eth          # ~8.000021 USDC for one year; 28-day minimum
+mm ensv2 faucet                  # mints 100 test USDC to this wallet
+```
+
+### Register
+
+```sh
+mm ensv2 register NAME.eth
+mm ensv2 whois NAME.eth
+```
+
+Commit, a 60-second wait, an ERC-20 approval, then the register call, with your resolver bound at registration. If anything interrupts it, run the same command again: it resumes from a private checkpoint with the **same** commitment and never commits twice. `whois` should say `REGISTERED`, your address, epoch 0, your resolver.
+
+### Agent
+
+```sh
+mm ensv2 agent register NAME.eth --uri https://example.com/agent.json
+mm ensv2 agent info NAME.eth
+```
+
+One transaction through Adapter8004 mints an ERC-8004 agent and binds it to your name's token. `info` shows `status: bound`, you as controller, and `ensip25Linked: false` until the next step writes the link. The URI should serve an [ERC-8004 registration file](/explainer/identity#the-registration-file).
+
+### Records
+
+```sh
+mm ensv2 records set NAME.eth --description "My agent" --url https://example.com \
+  --endpoints web=https://example.com --link-agent AGENT_ID
+mm ensv2 records get NAME.eth --agent-ids AGENT_ID
+mm ensv2 resolve NAME.eth
+```
+
+Six records in **one** transaction: `addr`, `description`, `url`, `agent-endpoint[web]`, the ENSIP-25 link `agent-registration[...][AGENT_ID] = "1"`, and a generated `agent-context`. `get` reads them back through the Universal Resolver, the way a stranger would. Running `set` again with the same flags sends nothing.
+
+### Primary name
+
+```sh
+mm ensv2 primary set NAME.eth
+mm ensv2 resolve 0xYourAddress     # → NAME.eth
+```
+
+Refused unless the name already resolves to you. Verified through the Universal Resolver's reverse lookup afterwards.
+
+::::
+
+## Or, as one job
+
+Since 0.7.0 steps 2 through 6 are one command:
+
+```sh
+mm ensv2 provision NAME --agent-uri https://example.com/agent.json \
+  --description "My agent" --endpoints web=https://example.com --dry-run
+mm ensv2 provision NAME --agent-uri https://example.com/agent.json \
+  --description "My agent" --endpoints web=https://example.com
+mm ensv2 jobs list
+```
+
+A receipt is written after every step. Interrupt it anywhere, run it again, and it re-derives what already happened from chain before doing anything. If a step was submitted and its outcome is unknown, it **stops and tells you** rather than paying twice. See [Durable jobs](/explainer/jobs).

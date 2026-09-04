@@ -1,0 +1,61 @@
+---
+title: "Agent identity"
+description: "ERC-8004 agents bound to ENSv2 names through Adapter8004, the ENSIP-25 link and ENSIP-26 discovery records, and the mutable-token-id limitation to know about."
+---
+
+# Agent identity: ERC-8004 and ENSIP-25/26
+
+A name becomes an *agent's* name when three things are true and anyone can check them: an ERC-8004 agent exists, the agent is bound to the name's token, and the name says so in its records.
+
+## ERC-8004 in one paragraph
+
+The **IdentityRegistry** (`0x8004A818…BD9e` on Sepolia) mints one NFT per agent. The token's `agentURI` points at a registration file describing the agent. That is the whole identity primitive: an id, an owner, and a document.
+
+## Adapter8004: mint and bind in one transaction
+
+`mm ensv2 agent register NAME.eth --uri URI` calls the **Adapter8004** proxy (`0x7621630c…2f92`, by unruggable-labs), which registers a new agent on the IdentityRegistry, keeps the agent NFT itself, and records an immutable binding `(standard, tokenContract, tokenId)` to your name's token in the `.eth` registry. Control is then derived on every call: you are the agent's controller because you own the name. `mm ensv2 agent info` reads the binding back, checks the registry's current token id against it, checks `isController`, and finds the NFT held by the adapter.
+
+Before building this, the adapter's live implementation was pinned from the proxy's EIP-1967 slot and its bytecode checked for the exact `register(uint8,address,uint256,string)` it exposes. The adapter's source repository is ahead of what is deployed; the plugin uses what is deployed.
+
+## The registration file
+
+Your `agentURI` should serve JSON in the ERC-8004 `registration-v1` shape. Two live examples are served by this site, [`/agents/10058.json`](/agents/10058.json) and [`/agents/10059.json`](/agents/10059.json):
+
+```json
+{
+  "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
+  "name": "sesquipedalian.eth",
+  "description": "ENSv2 e2e on Sepolia",
+  "image": "https://estmcmxci.co/favicon.svg",
+  "services": [{ "name": "web", "endpoint": "https://estmcmxci.co" }],
+  "x402Support": false,
+  "active": true,
+  "registrations": [
+    { "agentId": 10059, "agentRegistry": "eip155:11155111:0x8004A818BFB912233c491871b3d84c89A494BD9e" }
+  ]
+}
+```
+
+`type`, `name`, `description`, `image`, `services`, `x402Support`, `active` and `registrations` are required by the spec; `supportedTrust` is optional and, when absent, means the file is for discovery only.
+
+## ENSIP-25: the name points at the agent
+
+ENSIP-25 defines one text record per linked agent:
+
+```
+agent-registration[<ERC-7930 encoded registry>][<agentId>] = "1"
+```
+
+The registry is encoded per ERC-7930: version `0001`, chain type `0000` (eip155), a length-prefixed chain id, a length-prefixed address. For Sepolia's IdentityRegistry that is `0x0001000003aa36a7148004a818bfb912233c491871b3d84c89a494bd9e`; `mm ensv2 agent info` prints the finished key. The direction matters: the **name** asserts the agent, so a verifier who trusts the name's owner can trust the link. The spec deliberately has no enumeration, so `records get --agent-ids` checks the ids you name.
+
+## ENSIP-26: how to reach the agent
+
+`agent-context` is a free-form discovery record, Markdown welcome; the plugin writes a stub if you give none. `agent-endpoint[web]`, `agent-endpoint[mcp]` and `agent-endpoint[a2a]` name the endpoints. Alongside these the plugin writes the standard profile records: `addr`, `description` (ENSIP-18, 160 characters or fewer), `url` (ENSIP-5), `avatar` (ENSIP-12 grammar), `alias`. All of it lands in **one** resolver `multicall`, and all of it is read back through the Universal Resolver before the command returns.
+
+## The mutable token id
+
+The adapter's binding stores the name's token id. ENSv2 regenerates that id on every role grant or revoke. After one `grantRoles` on your name, the binding points at an id nobody owns, `isController` returns false, and the agent NFT stays in the adapter with no way out. `mm ensv2 agent info` detects this and reports `orphaned: true`.
+
+:::warning
+Until the adapter can anchor a binding on the name's stable registration resource, **do not grant or revoke roles on a name with a bound agent.** A resource-anchored token standard has been drafted for the adapter, with tests against the deployed Sepolia bytecode, and will be proposed to its maintainers. Nothing about it is agreed or deployed.
+:::

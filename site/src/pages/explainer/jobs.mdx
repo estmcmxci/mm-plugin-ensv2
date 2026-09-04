@@ -1,0 +1,40 @@
+---
+title: "Durable jobs"
+description: "provision runs the whole sequence as one resumable job with a receipt per step; how it re-derives state from chain and why it never pays twice."
+---
+
+# Durable jobs
+
+`mm ensv2 provision LABEL ...` runs resolver deploy, commit, approve, register, agent bind and records as **one job**. A step receipt is written after every step. Interrupt it anywhere; run it again; it continues.
+
+## What a job is
+
+A JSON file at `~/.mm-plugin-ensv2/jobs/<jobId>.json`, mode 0600, holding the provisioning intent, the job record with its step receipts, and a private section with the commit secret that `jobs show` redacts. The intent, job, receipts, errors and final verification result all validate against the **frozen 1.0.0 schemas** of the program this plugin belongs to, vendored with their sha256 provenance. Nothing is invented locally; when a field was missing, the feature stopped rather than the schema growing.
+
+## Resume re-derives, it does not remember
+
+Before acting on any step, the engine checks the chain for evidence that the step already happened: code at the predicted resolver and the factory's attestation; the commitment's timestamp and the 60 s / 24 h window; the allowance against the quote; `REGISTERED` to the owner; an `AgentBound` event for the current token id by this owner; every record readable back through the Universal Resolver. Evidence wins over the file.
+
+## Never pay twice
+
+- A step whose transaction was **submitted but whose outcome is unknown** halts the job with `E_RECEIPT_UNAVAILABLE` and the wallet's job handle. It is resent only with an explicit `--resubmit-unconfirmed`, after you have checked the chain.
+- The host wallet's results are classified against its actual contract, not assumed: a denial or an expired approval means nothing was broadcast and the next run simply retries; a "tracking expired" result with no hash means *unknown*, and the job halts; a reverted transaction is recorded by hash and the revert confirmed from chain before anything else happens.
+- A confirmed revert is retried once, on the next run, not in the same run.
+- Two concurrent runs for the same name cannot both write: job files are created exclusively and updated with a compare-and-swap, and the loser stops without writing.
+
+## Commands
+
+```sh
+mm ensv2 provision LABEL --agent-uri URI --description "..." --endpoints web=URL --dry-run
+mm ensv2 provision LABEL --agent-uri URI --description "..." --endpoints web=URL [--max-spend USDC]
+mm ensv2 jobs list
+mm ensv2 jobs show JOBID
+mm ensv2 jobs resume JOBID [--resubmit-unconfirmed] [--max-spend USDC]
+mm ensv2 jobs abandon JOBID
+```
+
+`provision` with the same inputs resumes the existing job; different inputs for the same name are refused as `E_IDEMPOTENCY_CONFLICT` until you abandon the old job. A completed job's last line tells you the one step it does not yet do itself: `mm ensv2 primary set NAME.eth`. The frozen job schema already defines a `reverse_record_set` step, so that becomes part of the job in a later release.
+
+## The interruption matrix
+
+Every irreversible step was killed immediately after its transaction landed and before the record was updated, then resumed against a mock chain replaying the real calldata. In every row the resume observed the evidence on chain, skipped the step, and made **zero** resubmissions. Two further rows kill before broadcast and confirm the halt; one replays the real network drop from the [evidence](/evidence) run. The rows that need a real wallet are listed in the pull request for you to fill in as you run them.
