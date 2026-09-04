@@ -10,7 +10,7 @@ npm run build        # dist/ — plain HTML, plus /llms.txt and /llms-full.txt
 npm run preview
 ```
 
-`SITE_URL` sets the canonical base URL at build time (default `https://ensv2.estmcmxci.co`); Cloudflare's `CF_PAGES_URL` is used for previews.
+`SITE_URL` sets the canonical base URL at build time (default `https://mm-ensv2.estmcmxci.co`); Cloudflare's `CF_PAGES_URL` is used for previews.
 
 Static files in `public/` are served from `/`: the marks, and the ERC-8004 registration files at `/agents/<agentId>.json`.
 
