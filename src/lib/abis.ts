@@ -114,3 +114,23 @@ export const resolverAbi = parseAbi([
 export const permissionedResolverAbi = parseAbi([
   "function initialize(address admin, uint256 roleBitmap, bytes[] setters) external",
 ]);
+
+/**
+ * Reverse resolution is v1 infrastructure at ENSv2 launch (see lib/primary.ts).
+ * ReverseRegistrar.setName: claims <sender>.addr.reverse with the default
+ * resolver and writes the name in one call — selector 0xc47f0027, present in
+ * the deployed bytecode at 0xA0a1AbcD…DC0C6 (checked 2026-09-04).
+ */
+export const reverseRegistrarAbi = parseAbi([
+  "function setName(string name) external returns (bytes32)",
+  "function node(address addr) external pure returns (bytes32)",
+  "function defaultResolver() external view returns (address)",
+]);
+/** The v2 `reverse` TLD resolver that mirrors the v1 registry (deployments/sepolia/ENSV1Resolver.json). */
+export const ensV1ResolverAbi = parseAbi(["function REGISTRY_V1() external view returns (address)"]);
+export const ensV1RegistryAbi = parseAbi([
+  "function owner(bytes32 node) external view returns (address)",
+  "function resolver(bytes32 node) external view returns (address)",
+]);
+/** ENSIP-3 name(bytes32), interface 0x691f3431 — what a reverse record literally says. */
+export const nameResolverAbi = parseAbi(["function name(bytes32 node) external view returns (string)"]);

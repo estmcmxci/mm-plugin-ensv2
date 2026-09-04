@@ -1,6 +1,6 @@
 {
   "name": "@estmcmxci/mm-plugin-ensv2",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "ENSv2 for the MetaMask Agent Wallet CLI (mm): fail-closed detection, resolution, and agent identity on Sepolia",
   "license": "MIT",
   "type": "module",
@@ -43,6 +43,9 @@
       },
       "ensv2:records": {
         "description": "The name's records: addr, profile, ENSIP-25/26 agent records"
+      },
+      "ensv2:primary": {
+        "description": "This wallet's primary name (reverse resolution): read it, set it"
       }
     }
   },
@@ -223,6 +226,33 @@
         "capabilities": [
           "wallet-read",
           "wallet-submit"
+        ],
+        "dataAccess": [
+          "accounts",
+          "network"
+        ],
+        "targetChains": [
+          11155111
+        ]
+      },
+      {
+        "id": "ensv2:primary:set",
+        "capabilities": [
+          "wallet-read",
+          "wallet-submit"
+        ],
+        "dataAccess": [
+          "accounts",
+          "network"
+        ],
+        "targetChains": [
+          11155111
+        ]
+      },
+      {
+        "id": "ensv2:primary:get",
+        "capabilities": [
+          "wallet-read"
         ],
         "dataAccess": [
           "accounts",
