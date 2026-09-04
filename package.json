@@ -1,8 +1,8 @@
 {
   "name": "@estmcmxci/mm-plugin-ensv2",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "ENSv2 for the MetaMask Agent Wallet CLI (mm): fail-closed detection, resolution, agent identity, primary names, and durable provisioning jobs on Sepolia",
-  "author": "estmcmxci 𝔪✶ (https://estmcmxci.co)",
+  "author": "estmcmxci \ud835\udd2a\u2736 (https://estmcmxci.co)",
   "license": "MIT",
   "homepage": "https://github.com/estmcmxci/mm-plugin-ensv2#readme",
   "repository": {
@@ -35,8 +35,14 @@
   "files": [
     "dist",
     "oclif.manifest.json",
-    "schemas/*.schema.json",
-    "schemas/PROVENANCE.md"
+    "schemas/PROVENANCE.md",
+    "schemas/common-primitives.schema.json",
+    "schemas/deployment-manifest.schema.json",
+    "schemas/errors.schema.json",
+    "schemas/provisioning-intent.schema.json",
+    "schemas/provisioning-job.schema.json",
+    "schemas/step-receipt.schema.json",
+    "schemas/verification-result.schema.json"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json && oclif manifest",
