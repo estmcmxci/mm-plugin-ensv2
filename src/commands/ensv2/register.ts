@@ -9,7 +9,7 @@ import {
 } from "@metamask/agent-wallet/plugin";
 import { isAddressEqual, type Address, type Hex } from "viem";
 import type { EnsV2Deployment } from "../../lib/deployments.js";
-import { parseChainId, requireEnsV2, toCommandError } from "../../lib/gate.js";
+import { parseChainId, parseDeploymentKey, requireEnsV2, toCommandError } from "../../lib/gate.js";
 import { clearPending, getPending, putPending } from "../../lib/pending.js";
 import { resolverInfo, whois } from "../../lib/reads.js";
 import {
@@ -51,6 +51,13 @@ const inputs = {
     type: InputFieldType.Text,
     flag: "chain",
     message: "EVM chain id (default 11155111, Sepolia)",
+    required: false,
+    prompt: false,
+  },
+  deployment: {
+    type: InputFieldType.Text,
+    flag: "deployment",
+    message: "ENSv2 deployment: beta (default, the canonical Sepolia beta) or hackathon (ENS Labs' ETHOnline deployment, a newer contract generation)",
     required: false,
     prompt: false,
   },
@@ -112,12 +119,13 @@ export default class EnsV2Register extends PluginCommand<RegisterResult> {
   protected readonly pluginCommandId = "ensv2:register";
 
   async execute(io: CommandIO): Promise<RegisterResult> {
-    const { name: input, years, chain } = await io.resolveInputs(inputs);
+    const { name: input, years, chain, deployment: deploymentFlag } = await io.resolveInputs(inputs);
     const chainId = parseChainId(chain);
+    const deploymentKey = parseDeploymentKey(deploymentFlag);
     const client = this.ctx.publicClient(chainId);
 
     try {
-      const { deployment: d } = await requireEnsV2(client, chainId);
+      const { deployment: d } = await requireEnsV2(client, chainId, deploymentKey);
       const owner = selectedEvmAddress(this.ctx.walletStateManager.read());
       if (!owner) throw new CommandError("ENSV2_NO_WALLET", "No EVM wallet is selected.", "Run `mm wallet` to create or select one, then retry.");
 

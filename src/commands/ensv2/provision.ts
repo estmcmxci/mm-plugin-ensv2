@@ -11,7 +11,7 @@ import { readFileSync } from "node:fs";
 import { isAddressEqual, parseUnits } from "viem";
 import { erc20Abi } from "../../lib/abis.js";
 import { viemProvisionChain } from "../../lib/chain.js";
-import { parseChainId, requireEnsV2 } from "../../lib/gate.js";
+import { parseChainId, parseDeploymentKey, requireEnsV2 } from "../../lib/gate.js";
 import { defaultStore, engineDeps, jobErrorToCommandError, programErrorToCommandError, summarize, type JobSummary } from "../../lib/hostjobs.js";
 import type { JobRecord } from "../../lib/jobs.js";
 import { ethLabel } from "../../lib/names.js";
@@ -39,6 +39,7 @@ const inputs = {
   resubmitUnconfirmed: b("resubmit-unconfirmed", "You have confirmed a step recorded as submitted never landed and is not pending; allow it to be sent again"),
   verifyRpc: t("verify-rpc", "Second, independent RPC URL for the final verification (default: MM_ENSV2_VERIFY_RPC or publicnode)"),
   chain: t("chain", "EVM chain id (default 11155111, Sepolia)"),
+  deployment: t("deployment", "ENSv2 deployment: beta (default, the canonical Sepolia beta) or hackathon (ENS Labs' ETHOnline deployment, a newer contract generation)"),
 } satisfies InputSchema;
 
 export type ProvisionResult = {
@@ -55,6 +56,9 @@ export type ProvisionResult = {
 export type ProvisionDryRun = {
   dryRun: true;
   jobId: string;
+  /** The deployment this job belongs to; it can only ever be resumed under this one. */
+  deploymentId: string;
+  deployment: string;
   existingJob: boolean;
   inputsMatch: boolean | null;
   conflict: string | null;
@@ -84,6 +88,7 @@ export default class EnsV2Provision extends PluginCommand<ProvisionResult | Prov
   static override examples = [
     '<%= config.bin %> ensv2 provision myagent --agent-uri https://agent.example/agent.json --description "My agent" --endpoints web=https://agent.example',
     "<%= config.bin %> ensv2 provision myagent --no-identity --dry-run",
+    "<%= config.bin %> ensv2 provision myagent --deployment hackathon --agent-uri https://agent.example/agent.json --dry-run",
     "<%= config.bin %> ensv2 provision myagent --agent-uri ipfs://bafy... --years 2 --json",
   ];
 
@@ -97,11 +102,12 @@ export default class EnsV2Provision extends PluginCommand<ProvisionResult | Prov
   async execute(io: CommandIO): Promise<ProvisionResult | ProvisionDryRun> {
     const v = await io.resolveInputs(inputs);
     const chainId = parseChainId(v.chain);
+    const deploymentKey = parseDeploymentKey(v.deployment);
     const client = this.ctx.publicClient(chainId);
     const store = defaultStore();
 
     try {
-      const { deployment: d } = await requireEnsV2(client, chainId);
+      const { deployment: d } = await requireEnsV2(client, chainId, deploymentKey);
       const owner = selectedEvmAddress(this.ctx.walletStateManager.read());
       if (!owner) throw new CommandError("ENSV2_NO_WALLET", "No EVM wallet is selected.", "Run `mm wallet` to create or select one, then retry.");
 
@@ -173,6 +179,8 @@ export default class EnsV2Provision extends PluginCommand<ProvisionResult | Prov
         return {
           dryRun: true,
           jobId: plan.file.job.jobId,
+          deploymentId: d.deploymentId,
+          deployment: d.key,
           existingJob: plan.kind === "existing",
           inputsMatch: plan.kind === "existing" ? plan.inputsMatch : null,
           conflict: plan.kind === "existing" && plan.conflict ? plan.conflict.code : null,
@@ -211,7 +219,7 @@ export default class EnsV2Provision extends PluginCommand<ProvisionResult | Prov
 
   override successHint(r: ProvisionResult | ProvisionDryRun): string {
     if (r.dryRun) {
-      return `${r.existingJob ? "Existing" : "New"} job ${r.jobId}${r.conflict ? ` — CONFLICT ${r.conflict}` : ""}: would submit ${r.wouldSubmit.length ? r.wouldSubmit.join(", ") : "nothing"}. Nothing was written or sent.`;
+      return `${r.existingJob ? "Existing" : "New"} job ${r.jobId} on ${r.deployment} (${r.deploymentId})${r.conflict ? ` — CONFLICT ${r.conflict}` : ""}: would submit ${r.wouldSubmit.length ? r.wouldSubmit.join(", ") : "nothing"}. Nothing was written or sent.`;
     }
     const v = r.verification ? `verification ${r.verification.outcome} (${r.verification.passed}/${r.verification.total} checks)` : "not verified";
     const line = `${r.job.name} ${r.job.state}${r.resumed ? " (resumed)" : ""}: ${v}${r.agentId ? `, agent #${r.agentId}` : ""}, ${r.transactionHashes.length} tx — job ${r.job.jobId}`;

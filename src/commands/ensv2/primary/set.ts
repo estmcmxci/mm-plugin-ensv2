@@ -7,13 +7,14 @@ import {
   schemaToArgs,
   schemaToFlags,
 } from "@metamask/agent-wallet/plugin";
-import { parseChainId, requireEnsV2, toCommandError } from "../../../lib/gate.js";
+import { parseChainId, parseDeploymentKey, requireEnsV2, toCommandError } from "../../../lib/gate.js";
 import { planSetPrimary, primaryStatus } from "../../../lib/primary.js";
 import { selectedEvmAddress } from "../../../lib/wallet.js";
 
 const inputs = {
   name: { type: InputFieldType.Text, flag: "name", message: "ENS name to make this wallet's primary name (must already resolve to this wallet)", required: true, index: 0 },
   chain: { type: InputFieldType.Text, flag: "chain", message: "EVM chain id (default 11155111, Sepolia)", required: false, prompt: false },
+  deployment: { type: InputFieldType.Text, flag: "deployment", message: "ENSv2 deployment: beta (default, the canonical Sepolia beta) or hackathon (ENS Labs' ETHOnline deployment, a newer contract generation)", required: false, prompt: false },
 } satisfies InputSchema;
 
 type PrimarySetResult = {
@@ -53,9 +54,10 @@ export default class EnsV2PrimarySet extends PluginCommand<PrimarySetResult> {
   async execute(io: CommandIO): Promise<PrimarySetResult> {
     const v = await io.resolveInputs(inputs);
     const chainId = parseChainId(v.chain);
+    const deploymentKey = parseDeploymentKey(v.deployment);
     const client = this.ctx.publicClient(chainId);
     try {
-      const { deployment: d } = await requireEnsV2(client, chainId);
+      const { deployment: d } = await requireEnsV2(client, chainId, deploymentKey);
       const owner = selectedEvmAddress(this.ctx.walletStateManager.read());
       if (!owner) throw new CommandError("ENSV2_NO_WALLET", "No EVM wallet is selected.", "Run `mm wallet` to create or select one, then retry.");
 

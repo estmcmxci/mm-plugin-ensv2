@@ -6,7 +6,7 @@ import {
   schemaToArgs,
   schemaToFlags,
 } from "@metamask/agent-wallet/plugin";
-import { parseChainId, requireEnsV2, toCommandError } from "../../lib/gate.js";
+import { parseChainId, parseDeploymentKey, requireEnsV2, toCommandError } from "../../lib/gate.js";
 import { whois, type WhoisInfo } from "../../lib/reads.js";
 
 const inputs = {
@@ -21,6 +21,13 @@ const inputs = {
     type: InputFieldType.Text,
     flag: "chain",
     message: "EVM chain id (default 11155111, Sepolia)",
+    required: false,
+    prompt: false,
+  },
+  deployment: {
+    type: InputFieldType.Text,
+    flag: "deployment",
+    message: "ENSv2 deployment: beta (default, the canonical Sepolia beta) or hackathon (ENS Labs' ETHOnline deployment, a newer contract generation)",
     required: false,
     prompt: false,
   },
@@ -53,11 +60,12 @@ export default class EnsV2Whois extends PluginCommand<WhoisInfo> {
   protected readonly pluginCommandId = "ensv2:whois";
 
   async execute(io: CommandIO): Promise<WhoisInfo> {
-    const { name, chain } = await io.resolveInputs(inputs);
+    const { name, chain, deployment: deploymentFlag } = await io.resolveInputs(inputs);
     const chainId = parseChainId(chain);
+    const deploymentKey = parseDeploymentKey(deploymentFlag);
     const client = this.ctx.publicClient(chainId);
     try {
-      const { deployment } = await requireEnsV2(client, chainId);
+      const { deployment } = await requireEnsV2(client, chainId, deploymentKey);
       return await whois(client, deployment, name);
     } catch (error) {
       throw toCommandError(error);
