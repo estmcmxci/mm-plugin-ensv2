@@ -17,6 +17,7 @@ import { buildDeployPlan, ownedResolverStatus } from "../dist/lib/resolver.js";
 import { agentInfo, bindPlan, findAgentIdsForName } from "../dist/lib/agent.js";
 import { defaultContext, endpointKey, planRecords, readRecordSet } from "../dist/lib/records.js";
 import { ensip25Key } from "../dist/lib/erc7930.js";
+import { planSetPrimary, primaryStatus } from "../dist/lib/primary.js";
 import { decodeFunctionResult } from "viem";
 import { adapter8004Abi } from "../dist/lib/abis.js";
 import {
@@ -140,6 +141,21 @@ try {
       show(await agentInfo(client, d, need(arg, "name"), id));
       break;
     }
+    case "primary": {
+      // npm run check -- primary <address>   — raw v1 reverse record + UR round-trip, and the registrar derivation
+      const d = await gate();
+      show(await primaryStatus(client, d, d.chainId, need(arg, "address")));
+      break;
+    }
+    case "primary-plan": {
+      // npm run check -- primary-plan <name> <owner>   — the exact setName calldata, eth_call'd from owner. Nothing sent.
+      const d = await gate();
+      const plan = await planSetPrimary(client, d, d.chainId, need(process.argv[4], "owner"), need(arg, "name"));
+      let sim = "already set — nothing to send";
+      if (plan.calldata) { try { await client.call({ account: plan.owner, to: plan.calldata.to, data: plan.calldata.data }); sim = "ok (eth_call of setName from owner succeeds)"; } catch (e) { sim = "REVERTED: " + (e.shortMessage ?? e.message); } }
+      show({ ...plan, calldata: plan.calldata ? { ...plan.calldata, value: "0" } : null, simulation: sim });
+      break;
+    }
     case "deploy-plan": {
       // The exact calldata `ensv2 resolver deploy` would hand to the wallet. Nothing is sent.
       const d = await gate();
@@ -148,7 +164,7 @@ try {
       break;
     }
     default:
-      console.error(`unknown check "${cmd}" — one of: status, whois, resolver, resolve, predict, deploy-plan`);
+      console.error(`unknown check "${cmd}" — one of: status, whois, resolver, resolve, predict, deploy-plan, available, price, register-plan, agent-plan, agent-info, records-get, records-plan, primary, primary-plan`);
       process.exit(2);
   }
 } catch (error) {

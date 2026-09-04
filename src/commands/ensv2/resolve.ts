@@ -75,7 +75,7 @@ export default class EnsV2Resolve extends PluginCommand<ResolveResult> {
       throw new CommandError(
         "ENSV2_NO_PRIMARY_NAME",
         `No primary ENSv2 name is set for ${result.address}.`,
-        "Reverse resolution only works when the address owner has set a primary name that forward-resolves back to it.",
+        "Reverse resolution only works when the address owner has set a primary name that forward-resolves back to it. Set one with `ensv2 primary set <name>`.",
       );
     }
     return result;

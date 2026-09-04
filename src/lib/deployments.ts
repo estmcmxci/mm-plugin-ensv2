@@ -47,6 +47,18 @@ export type EnsV2Deployment = {
   readonly adapter8004: `0x${string}`;
   /** Canonical ERC-8004 IdentityRegistry, as reported by adapter8004.identityRegistry(). */
   readonly identityRegistry: `0x${string}`;
+  /**
+   * The v1 ReverseRegistrar — owner of `addr.reverse` in the v1 registry.
+   * Per docs.ens.domains/ensv2/reverse-resolution ("At Launch") the reverse
+   * namespace stays on v1 infrastructure: the v2 root binds the `reverse` TLD
+   * to ENSV1Resolver, which mirrors the v1 registry, so a primary name is set
+   * by calling this contract's setName(name) from the address itself. Derived
+   * live on 2026-09-04 two independent ways, both 0xA0a1AbcD…DC0C6:
+   * ReverseRegistrarAdapter.REVERSE_REGISTRAR() (deployments/sepolia/
+   * ReverseRegistrarAdapter.json) and v1Registry.owner(namehash("addr.reverse")).
+   * Re-derived from the v2 root at runtime; a mismatch refuses to send.
+   */
+  readonly reverseRegistrar: `0x${string}`;
 };
 
 export const SEPOLIA: EnsV2Deployment = {
@@ -64,6 +76,7 @@ export const SEPOLIA: EnsV2Deployment = {
   // Adapter README + live EIP-1967 slot (impl 0x31a68E5b…) + identityRegistry() call, all checked 2026-09-03.
   adapter8004: "0x7621630cB63a73a194f45A3E6801B8C6A7eC2f92",
   identityRegistry: "0x8004A818BFB912233c491871b3d84c89A494BD9e",
+  reverseRegistrar: "0xA0a1AbcDAe1a2a4A2EF8e9113Ff0e02DD81DC0C6",
 };
 
 export const DEPLOYMENTS: Readonly<Record<number, EnsV2Deployment>> = {

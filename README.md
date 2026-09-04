@@ -26,6 +26,8 @@ mm ensv2 agent register <name> --uri <agentURI>   mint an ERC-8004 agent via Ada
 mm ensv2 agent info <name> [--agent-id n]         the binding, orphan check, controller check, NFT holder, agentURI
 mm ensv2 records set <name> [...]   addr + profile (ENSIP-5/12/18) + agent-context/agent-endpoint (ENSIP-26) + ENSIP-25 link, ONE tx
 mm ensv2 records get <name>         the record set as a stranger sees it, read through the Universal Resolver
+mm ensv2 primary get [address]      the address's primary name: raw reverse record, forward check, UR round-trip
+mm ensv2 primary set <name>         make <name> this wallet's primary name (one tx; name must already resolve to you)
 mm ensv2 resolver plan       predict THIS WALLET's resolver address + show the deploy calldata (read-only)
 mm ensv2 resolver deploy     deploy this wallet's resolver, once (no-op if it exists) — signs via MetaMask policy
 ```
@@ -95,6 +97,14 @@ It performs five reads and reports each one:
 4. that registry's `getParent()` points back at the root with label `eth` (backward)
 5. `VerifiableFactory.proxyLogic()` matches the configured proxy logic, so CREATE2 resolver prediction is sound
 
+### Primary name (`primary set`)
+
+Forward resolution (`name → address`) lives on your resolver; the reverse direction (`address → name`) lives in a separate namespace, `addr.reverse`. **At ENSv2 launch that namespace is still v1 infrastructure**: the v2 root registry binds the `reverse` TLD to `ENSV1Resolver`, which mirrors the v1 registry, and the Universal Resolver's `reverse()` reads through it. So a primary name is set by calling the **v1 `ReverseRegistrar.setName(name)`** from the wallet itself — one transaction that claims `<you>.addr.reverse` and writes the name. This is what the ENS docs prescribe ("Reverse Resolution — At Launch") and what the official `ens-cli` does.
+
+The registrar address is never trusted from the table. Before sending, the plugin walks `root.getResolver("reverse") → ENSV1Resolver.REGISTRY_V1() → v1Registry.owner(namehash("addr.reverse"))` and refuses if the result differs from the pinned value. It also refuses unless the name already forward-resolves to this wallet (a reverse record that does not round-trip is not a primary name — the Universal Resolver ignores it), and it verifies the round-trip through the Universal Resolver after the transaction. A second run is a no-op.
+
+`primary get` shows both layers: what the v1 reverse record literally says (`rawName`, `v1Resolver`) and what a stranger sees (`primaryName`, only non-null when the round-trip holds). ENSv2's own per-chain `L2ReverseRegistrar` with signature-based claims is "upcoming" in the docs; when the reverse namespace migrates, the derivation above will stop matching and this command will refuse rather than write to the wrong place.
+
 ## Build and run locally
 
 ```bash
@@ -104,6 +114,8 @@ npm run check                      # the five fail-closed checks, public Sepolia
 npm run check -- whois name.eth
 npm run check -- resolver name.eth
 npm run check -- resolve name.eth  # or an 0x address
+npm run check -- primary 0xYourAddress
+npm run check -- primary-plan name.eth 0xYourAddress
 ```
 
 Install into `mm` from a **packed tarball**, not the directory:
