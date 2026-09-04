@@ -1,0 +1,41 @@
+{
+  "schemaVersion": "1.0.0",
+  "deploymentId": "ensv2-sepolia-2026-07-30",
+  "chain": "eip155:11155111",
+  "name": {
+    "input": "Alice.eth",
+    "normalized": "alice.eth",
+    "labelhash": "0x0000000000000000000000000000000000000000000000000000000000000022"
+  },
+  "owner": "0x00000000000000000000000000000000000000a1",
+  "durationSeconds": 31536000,
+  "resolverConfigHash": "0x0000000000000000000000000000000000000000000000000000000000000033",
+  "payment": "x402",
+  "custodyMode": "sponsored-to-owner",
+  "identity": "none",
+  "identityConfigHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+  "maxSpend": {
+    "asset": "0x00000000000000000000000000000000000000c0",
+    "maxTotalAmount": "5000000",
+    "maxRegistrationAmount": "5000000"
+  },
+  "nonce": "3",
+  "expiry": 1787700000,
+  "provider": {
+    "providerId": "0x0000000000000000000000000000000000000000000000000000000000000055",
+    "url": "https://registrar.example.invalid"
+  },
+  "idempotencyKey": "0x0000000000000000000000000000000000000000000000000000000000000011",
+  "eip712": {
+    "primaryType": "ProvisioningIntent",
+    "intentHash": "0x0000000000000000000000000000000000000000000000000000000000000011",
+    "domainName": "MetaMask ENSv2 Provisioning",
+    "domainVersion": "1"
+  },
+  "signature": {
+    "signer": "0x00000000000000000000000000000000000000a1",
+    "value": "0xababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababab",
+    "signedAt": "2026-08-25T18:00:00Z"
+  },
+  "rolesConfigHash": "0x0000000000000000000000000000000000000000000000000000000000000000"
+}

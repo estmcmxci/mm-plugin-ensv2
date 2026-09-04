@@ -1,0 +1,16 @@
+{
+  "code": "E_DEPLOYMENT_DRIFT",
+  "category": "deployment",
+  "retryability": "terminal",
+  "message": "Universal Resolver reported a registry that does not match the pinned deployment. Execution aborted before any wallet request.",
+  "occurredAt": "2026-08-25T18:05:00Z",
+  "step": "canonicality_check",
+  "source": "verifier",
+  "recoveryAction": {
+    "kind": "abandon_job",
+    "description": "Regenerate the deployment manifest from current artifacts and re-plan. Do not execute against a drifted registry."
+  },
+  "evidence": {
+    "deploymentId": "ensv2-sepolia-2026-07-30"
+  }
+}

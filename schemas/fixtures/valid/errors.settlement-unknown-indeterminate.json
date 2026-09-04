@@ -1,0 +1,18 @@
+{
+  "code": "E_PAYMENT_SETTLEMENT_UNKNOWN",
+  "category": "payment",
+  "retryability": "indeterminate",
+  "message": "The paid request timed out before a settlement outcome was observed. Payment may or may not have been taken.",
+  "occurredAt": "2026-08-25T18:06:00Z",
+  "step": "payment_settle",
+  "source": "provider",
+  "recoveryAction": {
+    "kind": "inspect_settlement_before_any_retry",
+    "description": "Query the provider job by idempotency key and inspect settlement state. Do not resubmit payment.",
+    "resumeFrom": "payment_settle"
+  },
+  "evidence": {
+    "jobId": "job-77",
+    "intentHash": "0x0000000000000000000000000000000000000000000000000000000000000011"
+  }
+}

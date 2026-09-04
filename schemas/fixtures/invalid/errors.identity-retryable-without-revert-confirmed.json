@@ -1,0 +1,12 @@
+{
+  "code": "E_IDENTITY_BINDING_FAILED",
+  "category": "identity",
+  "retryability": "retryable",
+  "message": "Binding did not complete.",
+  "occurredAt": "2026-08-25T19:01:00Z",
+  "recoveryAction": {
+    "kind": "retry_same_step",
+    "description": "try again"
+  },
+  "$expectedError": "D-010: identity binding may only be retryable against a confirmed revert, because register() mints a new agent and there is no unbind"
+}

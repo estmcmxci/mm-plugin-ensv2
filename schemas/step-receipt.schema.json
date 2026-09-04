@@ -1,0 +1,269 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:mm-ens-identity:schema:step-receipt:1.0.0",
+  "title": "Step receipt",
+  "description": "Evidence that one step of a provisioning job happened. Two kinds: an onchain transaction receipt and an x402 payment settlement receipt. A transaction hash is NOT success; a transaction receipt is only accepted as evidence once receiptStatus is read, and state must still be verified separately (PROGRAM-CONTEXT section 12).",
+  "version": "1.0.0",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/noSecrets"
+    }
+  ],
+  "required": [
+    "kind"
+  ],
+  "oneOf": [
+    {
+      "$ref": "#/$defs/transactionReceipt"
+    },
+    {
+      "$ref": "#/$defs/settlementReceipt"
+    },
+    {
+      "$ref": "#/$defs/signatureReceipt"
+    }
+  ],
+  "$defs": {
+    "transactionReceipt": {
+      "type": "object",
+      "required": [
+        "kind",
+        "chain",
+        "deploymentId",
+        "step",
+        "transactionHash",
+        "receiptStatus",
+        "submittedAt"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "transaction"
+        },
+        "chain": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/caip2"
+        },
+        "deploymentId": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/deploymentId"
+        },
+        "step": {
+          "$ref": "#/$defs/stepName"
+        },
+        "transactionHash": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/hash32"
+        },
+        "receiptStatus": {
+          "enum": [
+            "success",
+            "reverted",
+            "unknown"
+          ],
+          "description": "unknown means the receipt has not been read yet. An unknown receipt is never treated as success and never as failure; it is an indeterminate state that must be resolved by inspection."
+        },
+        "blockNumber": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "blockHash": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/hash32"
+        },
+        "from": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/address"
+        },
+        "to": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/address"
+        },
+        "gasUsed": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/uint256String"
+        },
+        "effectiveGasPrice": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/uint256String"
+        },
+        "nonce": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "submittedAt": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/isoTimestamp"
+        },
+        "confirmedAt": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/isoTimestamp"
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "walletJobId": {
+          "type": "string",
+          "description": "Handle from the wallet execution plane, so a submitted transaction can be recovered after a process restart."
+        }
+      }
+    },
+    "settlementReceipt": {
+      "type": "object",
+      "description": "One accepted x402 settlement. Exactly one settlement maps to exactly one provider job (gate G4). This receipt records the settlement's identity and outcome; it must never carry the payment authorization payload, which is reusable.",
+      "required": [
+        "kind",
+        "settlementId",
+        "x402Version",
+        "scheme",
+        "asset",
+        "network",
+        "amount",
+        "payer",
+        "payee",
+        "status",
+        "settledAt",
+        "idempotencyKey",
+        "intentHash"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "settlement"
+        },
+        "settlementId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "x402Version": {
+          "type": "string",
+          "description": "Exact protocol version accepted. Pinned by P-006."
+        },
+        "scheme": {
+          "type": "string",
+          "description": "x402 payment scheme. Pinned by P-006."
+        },
+        "asset": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/address"
+        },
+        "network": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/caip2"
+        },
+        "amount": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/uint256String"
+        },
+        "payer": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/address"
+        },
+        "payee": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/address"
+        },
+        "facilitator": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "settled",
+            "rejected",
+            "unknown"
+          ],
+          "description": "unknown is a first-class outcome, not an error to be papered over. It maps to E_PAYMENT_SETTLEMENT_UNKNOWN with retryability indeterminate, and forbids an automatic second payment."
+        },
+        "settledAt": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/isoTimestamp"
+        },
+        "idempotencyKey": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/hash32",
+          "description": "Exactly the intentHash, verbatim. This is the third site of the key and the one where the settlement-to-job binding is asserted, so it carries the same type as the intent and the job rather than a looser string."
+        },
+        "intentHash": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/hash32",
+          "description": "Canonical reconciliation key back to the signed intent. Required, so a settlement can always be tied to exactly one intent and one job without a side channel."
+        },
+        "providerJobId": {
+          "type": "string"
+        },
+        "settlementTransactionHash": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/hash32"
+        }
+      }
+    },
+    "stepName": {
+      "enum": [
+        "resolver_deploy",
+        "resolver_initialize",
+        "payment_token_approve",
+        "commitment_submit",
+        "registration_submit",
+        "records_configure",
+        "roles_configure",
+        "identity_bind",
+        "identity_metadata_publish",
+        "ownership_transfer",
+        "reverse_record_set",
+        "intent_sign",
+        "payment_authorize",
+        "renewal_submit"
+      ]
+    },
+    "signatureReceipt": {
+      "type": "object",
+      "description": "A wallet signature or MFA approval request. Records only the handle and the outcome. The signed value itself is deliberately not representable: there is no field for it, and the noSecrets guard rejects the usual smuggling names. A signature receipt proves that an authorization step happened and can be recovered after a restart; it is not a copy of the authorization.",
+      "required": [
+        "kind",
+        "signatureKind",
+        "walletJobId",
+        "status",
+        "requestedAt"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "signature"
+        },
+        "signatureKind": {
+          "enum": [
+            "provisioning-intent",
+            "payment-authorization",
+            "typed-data",
+            "personal-sign"
+          ]
+        },
+        "walletJobId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "Handle in the wallet execution plane. This is how a pending or MFA-gated approval is recovered after the CLI restarts."
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "approved",
+            "rejected",
+            "expired",
+            "unknown"
+          ]
+        },
+        "mfaRequired": {
+          "type": "boolean"
+        },
+        "policyDecision": {
+          "enum": [
+            "allowed",
+            "denied",
+            "not_evaluated"
+          ]
+        },
+        "requestedAt": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/isoTimestamp"
+        },
+        "resolvedAt": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/isoTimestamp"
+        },
+        "signerAddress": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/address"
+        },
+        "intentHash": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/hash32",
+          "description": "Digest that was presented for signature. The digest is not secret; the signature over it is, and is not recorded here."
+        },
+        "step": {
+          "$ref": "#/$defs/stepName"
+        }
+      }
+    }
+  }
+}

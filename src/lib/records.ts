@@ -177,6 +177,44 @@ export type RecordsPlan = {
   calls: number;
 };
 
+export type RecordsDiff = { changes: RecordsPlan["changes"]; unchanged: string[] };
+
+/**
+ * Pure diff of the desired set against what the chain currently answers
+ * (each read already three-state). Throws on a lookup failure: an unreadable
+ * record is never overwritten. Shared by `records set` and the v0.6 job engine.
+ */
+export function diffRecords(name: string, current: { addr: RecordRead; texts: Record<string, RecordRead> }, desired: DesiredRecords): RecordsDiff {
+  const changes: RecordsPlan["changes"] = {};
+  const unchanged: string[] = [];
+  if (desired.addr) {
+    const cur = current.addr;
+    if (cur.status === "lookup_failed") throw new ReadError("ENSV2_LOOKUP_FAILED", `Could not read addr for ${name}: ${cur.error}`, "Retry; refusing to write over an unreadable record.");
+    if (!cur.value || !isAddressEqual(getAddress(cur.value), desired.addr)) changes.addr = { from: cur.value, to: desired.addr };
+    else unchanged.push("addr");
+  }
+  for (const [key, value] of Object.entries(desired.texts)) {
+    const cur = current.texts[key];
+    if (!cur || cur.status === "lookup_failed") throw new ReadError("ENSV2_LOOKUP_FAILED", `Could not read ${key} for ${name}: ${cur?.error ?? "not read"}`, "Retry; refusing to write over an unreadable record.");
+    if (cur.value !== value) changes[key] = { from: cur.value, to: value };
+    else unchanged.push(key);
+  }
+  return { changes, unchanged };
+}
+
+/** One resolver multicall covering exactly the changed keys; null when nothing changes. Pure. */
+export function buildRecordsMulticall(resolver: Address, node: Hex, changes: RecordsPlan["changes"]): { calldata: Calldata | null; calls: number } {
+  const calls: Hex[] = [];
+  for (const [key, c] of Object.entries(changes)) {
+    if (key === "addr") calls.push(encodeFunctionData({ abi: resolverAbi, functionName: "setAddr", args: [node, getAddress(c.to)] }));
+    else calls.push(encodeFunctionData({ abi: resolverAbi, functionName: "setText", args: [node, key, c.to] }));
+  }
+  const calldata: Calldata | null = calls.length
+    ? { to: resolver, data: encodeFunctionData({ abi: resolverAbi, functionName: "multicall", args: [calls] }), value: 0n }
+    : null;
+  return { calldata, calls: calls.length };
+}
+
 /** Diff desired vs on-chain (via UR) and build a single resolver multicall for the difference. */
 export async function planRecords(client: PublicClient, d: EnsV2Deployment, rawName: string, owner: Address, desired: DesiredRecords): Promise<RecordsPlan> {
   const name = normalizeName(rawName);
@@ -194,33 +232,12 @@ export async function planRecords(client: PublicClient, d: EnsV2Deployment, rawN
   }
   const resolver = info.resolver;
 
-  const changes: RecordsPlan["changes"] = {};
-  const unchanged: string[] = [];
-  const calls: Hex[] = [];
-
-  if (desired.addr) {
-    const cur = await readAddr(ens, d, name);
-    if (cur.status === "lookup_failed") throw new ReadError("ENSV2_LOOKUP_FAILED", `Could not read addr for ${name}: ${cur.error}`, "Retry; refusing to write over an unreadable record.");
-    if (!cur.value || !isAddressEqual(getAddress(cur.value), desired.addr)) {
-      changes.addr = { from: cur.value, to: desired.addr };
-      calls.push(encodeFunctionData({ abi: resolverAbi, functionName: "setAddr", args: [node, desired.addr] }));
-    } else unchanged.push("addr");
-  }
-
-  for (const [key, value] of Object.entries(desired.texts)) {
-    const cur = await readText(ens, d, name, key);
-    if (cur.status === "lookup_failed") throw new ReadError("ENSV2_LOOKUP_FAILED", `Could not read ${key} for ${name}: ${cur.error}`, "Retry; refusing to write over an unreadable record.");
-    if (cur.value !== value) {
-      changes[key] = { from: cur.value, to: value };
-      calls.push(encodeFunctionData({ abi: resolverAbi, functionName: "setText", args: [node, key, value] }));
-    } else unchanged.push(key);
-  }
-
-  const calldata: Calldata | null = calls.length
-    ? { to: resolver, data: encodeFunctionData({ abi: resolverAbi, functionName: "multicall", args: [calls] }), value: 0n }
-    : null;
-
-  return { name, node, resolver, changes, unchanged, calldata, calls: calls.length };
+  const keys = Object.keys(desired.texts);
+  const [addr, ...texts] = await Promise.all([desired.addr ? readAddr(ens, d, name) : Promise.resolve<RecordRead>({ status: "absent", value: null }), ...keys.map((k) => readText(ens, d, name, k))]);
+  const current = { addr, texts: Object.fromEntries(keys.map((k, i) => [k, texts[i]!])) };
+  const { changes, unchanged } = diffRecords(name, current, desired);
+  const { calldata, calls } = buildRecordsMulticall(resolver, node, changes);
+  return { name, node, resolver, changes, unchanged, calldata, calls };
 }
 
 /** Default agent-context stub when none is provided and none exists. Markdown, per ENSIP-26's own example. */

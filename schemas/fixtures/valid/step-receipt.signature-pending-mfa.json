@@ -1,0 +1,10 @@
+{
+  "kind": "signature",
+  "signatureKind": "payment-authorization",
+  "walletJobId": "wjob-102",
+  "status": "pending",
+  "mfaRequired": true,
+  "policyDecision": "not_evaluated",
+  "requestedAt": "2026-08-25T18:00:30Z",
+  "step": "payment_authorize"
+}

@@ -7,6 +7,7 @@
 //   npm run check -- whois name.eth
 //   npm run check -- resolver name.eth
 //   npm run check -- resolve name.eth | 0xaddress
+//   npm run check -- provision-plan <name> <owner> [agentURI|none] [years]
 //
 // ETH_RPC_URL overrides the endpoint.
 import { createPublicClient, http } from "viem";
@@ -24,6 +25,10 @@ import {
   ZERO_ADDRESS, ZERO_REFERRER, buildApprove, buildCommit, buildRegister, checkAvailable, computeCommitment,
   makeSecret, quoteRegistration, tokenState, yearsToSeconds,
 } from "../dist/lib/registrar.js";
+import { viemProvisionChain } from "../dist/lib/chain.js";
+import { MemoryJobStore, redactJobFile } from "../dist/lib/jobs.js";
+import { PlanRefused, observeJob, planProvision, stepsFor } from "../dist/lib/provision.js";
+import { SCHEMA_IDS, validateSchema } from "../dist/lib/schema.js";
 
 const rpc = process.env.ETH_RPC_URL ?? "https://ethereum-sepolia-rpc.publicnode.com";
 const client = createPublicClient({ transport: http(rpc) });
@@ -156,6 +161,52 @@ try {
       show({ ...plan, calldata: plan.calldata ? { ...plan.calldata, value: "0" } : null, simulation: sim });
       break;
     }
+    case "provision-plan": {
+      // npm run check -- provision-plan <name> <owner> [agentURI|none] [years]
+      // Everything `ensv2 provision` would decide before touching the wallet: the intent (validated against the
+      // frozen schema) and its digest, the job id, the step list, and what each step observes on chain right now.
+      // Uses an in-memory job store, so ~/.mm-plugin-ensv2/jobs is never read or written. Nothing is sent.
+      const d = await gate();
+      const owner = need(process.argv[4], "owner-address");
+      const uriArg = process.argv[5];
+      const agentUri = uriArg && uriArg !== "none" ? uriArg : null;
+      const chain = viemProvisionChain(client, d);
+      const label = need(arg, "name").replace(/\.eth$/, "");
+      const web = "https://example.invalid";
+      const req = {
+        input: arg, owner, durationSeconds: yearsToSeconds(process.argv[6]),
+        identity: agentUri ? { agentUri } : null,
+        records: { addr: owner, texts: { description: "ENSv2 agent wallet on Sepolia (provision-plan check)", url: web, [endpointKey("web")]: web, "agent-context": defaultContext(label + ".eth", "ENSv2 agent wallet on Sepolia (provision-plan check)", { web }, undefined) } },
+        resolverMode: "deploy-owned",
+      };
+      let plan;
+      try { plan = await planProvision({ chain, deployment: d, store: new MemoryJobStore(), log: (l, m) => console.error(`[${l}] ${m}`) }, req, { checkFunding: false }); }
+      catch (e) { if (e instanceof PlanRefused) { show({ refused: e.error }); process.exit(1); } throw e; }
+      const file = plan.file;
+      const intentCheck = validateSchema(SCHEMA_IDS.intent, file.intent);
+      const jobCheck = validateSchema(SCHEMA_IDS.job, file.job);
+      const observations = await observeJob(chain, d, file);
+      const sims = {};
+      const res = await ownedResolverStatus(client, d, owner);
+      if (!res.deployed) {
+        const dp = buildDeployPlan(d, res);
+        try { await client.call({ account: owner, to: dp.to, data: dp.data }); sims.resolverDeploy = "ok (eth_call from owner succeeds)"; } catch (e) { sims.resolverDeploy = "REVERTED: " + (e.shortMessage ?? e.message); }
+      }
+      const commit = buildCommit(d, file.job.facts.commitmentHash);
+      try { await client.call({ account: owner, to: commit.to, data: commit.data }); sims.commit = "ok (eth_call from owner succeeds)"; } catch (e) { sims.commit = "REVERTED: " + (e.shortMessage ?? e.message); }
+      const funds = await tokenState(client, d, owner);
+      show({
+        jobId: file.job.jobId, intentHash: file.intent.eip712.intentHash, deploymentId: d.deploymentId,
+        alreadyRegistered: plan.alreadyRegistered, quoteTotal: plan.quoteTotal.toString(),
+        funds: { balance: funds.balance.toString(), allowance: funds.allowance.toString(), sufficient: funds.balance >= plan.quoteTotal },
+        schema: { intent: intentCheck.ok ? "valid" : intentCheck.errors, job: jobCheck.ok ? "valid" : jobCheck.errors },
+        steps: stepsFor(file.intent), observations, wouldSubmit: observations.filter((o) => o.wouldSubmit).map((o) => o.step),
+        simulations: sims,
+        intent: file.intent,
+        job: redactJobFile(file).job,
+      });
+      break;
+    }
     case "deploy-plan": {
       // The exact calldata `ensv2 resolver deploy` would hand to the wallet. Nothing is sent.
       const d = await gate();
@@ -164,7 +215,7 @@ try {
       break;
     }
     default:
-      console.error(`unknown check "${cmd}" — one of: status, whois, resolver, resolve, predict, deploy-plan, available, price, register-plan, agent-plan, agent-info, records-get, records-plan, primary, primary-plan`);
+      console.error(`unknown check "${cmd}" — one of: status, whois, resolver, resolve, predict, available, price, register-plan, agent-plan, agent-info, records-get, records-plan, primary, primary-plan, deploy-plan, provision-plan`);
       process.exit(2);
   }
 } catch (error) {

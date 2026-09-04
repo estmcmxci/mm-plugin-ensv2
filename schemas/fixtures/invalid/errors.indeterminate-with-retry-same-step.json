@@ -1,0 +1,12 @@
+{
+  "code": "E_PAYMENT_SETTLEMENT_UNKNOWN",
+  "category": "payment",
+  "retryability": "indeterminate",
+  "message": "timed out",
+  "occurredAt": "2026-08-25T19:02:00Z",
+  "recoveryAction": {
+    "kind": "retry_same_step",
+    "description": "just retry it"
+  },
+  "$expectedError": "an indeterminate outcome is resolved by inspection, never by repeating the operation"
+}

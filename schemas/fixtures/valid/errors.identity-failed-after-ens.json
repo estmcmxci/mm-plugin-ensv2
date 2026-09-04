@@ -1,0 +1,18 @@
+{
+  "code": "E_IDENTITY_BINDING_FAILED",
+  "category": "identity",
+  "retryability": "retryable",
+  "message": "Adapter binding reverted; the revert was confirmed by reading the receipt. ENS registration is complete and unaffected.",
+  "occurredAt": "2026-08-25T18:07:00Z",
+  "step": "identity_bind",
+  "source": "protocol",
+  "recoveryAction": {
+    "kind": "resume_identity_only",
+    "description": "Re-read the current token ID and resume from identity preflight. Do not re-register and do not repay.",
+    "resumeFrom": "identity_preflight"
+  },
+  "evidence": {
+    "revertConfirmed": true,
+    "jobId": "job-77"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "code": "E_SOMETHING_ELSE",
+  "category": "internal",
+  "retryability": "terminal",
+  "message": "x",
+  "occurredAt": "2026-08-25T18:00:00Z",
+  "recoveryAction": {
+    "kind": "none",
+    "description": "x"
+  },
+  "$expectedError": "codes are a closed enum; consumers may not invent local codes"
+}

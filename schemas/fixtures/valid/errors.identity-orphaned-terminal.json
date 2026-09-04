@@ -1,0 +1,13 @@
+{
+  "code": "E_IDENTITY_BINDING_ORPHANED",
+  "category": "identity",
+  "retryability": "terminal",
+  "message": "The bound token ID is no longer current and no unbind exists. The ERC-8004 identity can no longer be controlled through this binding.",
+  "occurredAt": "2026-08-25T19:00:00Z",
+  "step": "identity_verify",
+  "source": "verifier",
+  "recoveryAction": {
+    "kind": "reregister_identity",
+    "description": "Mint a fresh agent bound to the current resource anchor. Resumption cannot fix this: there is no unbind."
+  }
+}

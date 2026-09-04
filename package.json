@@ -1,7 +1,7 @@
 {
   "name": "@estmcmxci/mm-plugin-ensv2",
-  "version": "0.6.1",
-  "description": "ENSv2 for the MetaMask Agent Wallet CLI (mm): fail-closed detection, resolution, and agent identity on Sepolia",
+  "version": "0.7.0",
+  "description": "ENSv2 for the MetaMask Agent Wallet CLI (mm): fail-closed detection, resolution, agent identity, primary names, and durable provisioning jobs on Sepolia",
   "license": "MIT",
   "type": "module",
   "repository": {
@@ -20,12 +20,15 @@
   ],
   "files": [
     "dist",
-    "oclif.manifest.json"
+    "oclif.manifest.json",
+    "schemas/*.schema.json",
+    "schemas/PROVENANCE.md"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json && oclif manifest",
     "prepack": "tsc -p tsconfig.json && oclif manifest",
-    "check": "node scripts/check.mjs"
+    "check": "node scripts/check.mjs",
+    "test": "npm run build && node --test test/*.test.mjs"
   },
   "oclif": {
     "bin": "mm",
@@ -46,6 +49,9 @@
       },
       "ensv2:primary": {
         "description": "This wallet's primary name (reverse resolution): read it, set it"
+      },
+      "ensv2:jobs": {
+        "description": "Durable provisioning jobs: list, inspect, resume (never repeats a paid step)"
       }
     }
   },
@@ -253,6 +259,58 @@
         "id": "ensv2:primary:get",
         "capabilities": [
           "wallet-read"
+        ],
+        "dataAccess": [
+          "accounts",
+          "network"
+        ],
+        "targetChains": [
+          11155111
+        ]
+      },
+      {
+        "id": "ensv2:provision",
+        "capabilities": [
+          "wallet-read",
+          "wallet-submit"
+        ],
+        "dataAccess": [
+          "accounts",
+          "network"
+        ],
+        "targetChains": [
+          11155111
+        ]
+      },
+      {
+        "id": "ensv2:jobs:list",
+        "capabilities": [
+          "wallet-read"
+        ],
+        "dataAccess": [
+          "network"
+        ],
+        "targetChains": [
+          11155111
+        ]
+      },
+      {
+        "id": "ensv2:jobs:show",
+        "capabilities": [
+          "wallet-read"
+        ],
+        "dataAccess": [
+          "network"
+        ],
+        "targetChains": [
+          11155111
+        ]
+      },
+      {
+        "id": "ensv2:jobs:resume",
+        "capabilities": [
+          "wallet-read",
+          "wallet-submit"
         ],
         "dataAccess": [
           "accounts",
