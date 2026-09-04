@@ -33,3 +33,6 @@ img[alt='𝔪✶ estmcmxci'] { height: 28px; width: auto; }
 
 /* Evidence tables carry long hashes: let them scroll, never wrap the page. */
 table { display: block; overflow-x: auto; max-width: 100%; }
+
+/* Hashes and addresses in table cells stay on one line; the table scrolls instead. */
+td code, td a code { white-space: nowrap; }
