@@ -10,7 +10,7 @@ import {
 import { readFileSync } from "node:fs";
 import { getAddress, type Address } from "viem";
 import { ensip25Key } from "../../../lib/erc7930.js";
-import { parseChainId, requireEnsV2, toCommandError } from "../../../lib/gate.js";
+import { parseChainId, parseDeploymentKey, requireEnsV2, toCommandError } from "../../../lib/gate.js";
 import {
   defaultContext,
   endpointKey,
@@ -38,6 +38,7 @@ const inputs = {
   endpoints: t("endpoints", "agent-endpoint records: mcp=<url>,a2a=<url>,web=<url> (ENSIP-26)"),
   linkAgent: t("link-agent", "ERC-8004 agent id to link via ENSIP-25 (writes agent-registration[<registry>][<id>] = \"1\")"),
   chain: t("chain", "EVM chain id (default 11155111, Sepolia)"),
+  deployment: t("deployment", "ENSv2 deployment: beta (default, the canonical Sepolia beta) or hackathon (ENS Labs' ETHOnline deployment, a newer contract generation)"),
 } satisfies InputSchema;
 
 type RecordsSetResult = {
@@ -75,10 +76,11 @@ export default class EnsV2RecordsSet extends PluginCommand<RecordsSetResult> {
   async execute(io: CommandIO): Promise<RecordsSetResult> {
     const v = await io.resolveInputs(inputs);
     const chainId = parseChainId(v.chain);
+    const deploymentKey = parseDeploymentKey(v.deployment);
     const client = this.ctx.publicClient(chainId);
 
     try {
-      const { deployment: d } = await requireEnsV2(client, chainId);
+      const { deployment: d } = await requireEnsV2(client, chainId, deploymentKey);
       const owner = selectedEvmAddress(this.ctx.walletStateManager.read());
       if (!owner) throw new CommandError("ENSV2_NO_WALLET", "No EVM wallet is selected.", "Run `mm wallet` to create or select one, then retry.");
 

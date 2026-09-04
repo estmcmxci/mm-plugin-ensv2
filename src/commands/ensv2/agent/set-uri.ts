@@ -8,7 +8,7 @@ import {
   schemaToFlags,
 } from "@metamask/agent-wallet/plugin";
 import { agentInfo, findAgentIdsForName, setUriPlan } from "../../../lib/agent.js";
-import { parseChainId, requireEnsV2, toCommandError } from "../../../lib/gate.js";
+import { parseChainId, parseDeploymentKey, requireEnsV2, toCommandError } from "../../../lib/gate.js";
 import { selectedEvmAddress } from "../../../lib/wallet.js";
 
 const inputs = {
@@ -16,6 +16,7 @@ const inputs = {
   uri: { type: InputFieldType.Text, flag: "uri", message: "new agentURI — http(s):// or ipfs:// URI of the agent's ERC-8004 registration JSON", required: true, prompt: true },
   agentId: { type: InputFieldType.Text, flag: "agent-id", message: "ERC-8004 agent id (default: the agent bound to the name, found by event scan)", required: false, prompt: false },
   chain: { type: InputFieldType.Text, flag: "chain", message: "EVM chain id (default 11155111, Sepolia)", required: false, prompt: false },
+  deployment: { type: InputFieldType.Text, flag: "deployment", message: "ENSv2 deployment: beta (default, the canonical Sepolia beta) or hackathon (ENS Labs' ETHOnline deployment, a newer contract generation)", required: false, prompt: false },
 } satisfies InputSchema;
 
 type SetUriResult = {
@@ -56,9 +57,10 @@ export default class EnsV2AgentSetUri extends PluginCommand<SetUriResult> {
   async execute(io: CommandIO): Promise<SetUriResult> {
     const v = await io.resolveInputs(inputs);
     const chainId = parseChainId(v.chain);
+    const deploymentKey = parseDeploymentKey(v.deployment);
     const client = this.ctx.publicClient(chainId);
     try {
-      const { deployment: d } = await requireEnsV2(client, chainId);
+      const { deployment: d } = await requireEnsV2(client, chainId, deploymentKey);
       const owner = selectedEvmAddress(this.ctx.walletStateManager.read());
       if (!owner) throw new CommandError("ENSV2_NO_WALLET", "No EVM wallet is selected.", "Run `mm wallet` to create or select one, then retry.");
 

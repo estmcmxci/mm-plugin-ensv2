@@ -1,13 +1,15 @@
 import { CommandError, type CommandIO, InputFieldType, type InputSchema, PluginCommand, schemaToArgs, schemaToFlags } from "@metamask/agent-wallet/plugin";
+import { parseDeploymentKey } from "../../../lib/gate.js";
 import { defaultStore } from "../../../lib/hostjobs.js";
 import { TERMINAL_STATES } from "../../../lib/jobs.js";
 
 const inputs = {
   jobId: { type: InputFieldType.Text, flag: "job-id", message: "Job id (see `ensv2 jobs list --all`)", required: true, index: 0 },
   force: { type: InputFieldType.Boolean, flag: "force", message: "Set aside a job that is not finished (it may hold a live commitment whose secret goes with it)", required: false, prompt: false, default: false },
+  deployment: { type: InputFieldType.Text, flag: "deployment", message: "ENSv2 deployment: beta (default, the canonical Sepolia beta) or hackathon (ENS Labs' ETHOnline deployment, a newer contract generation)", required: false, prompt: false },
 } satisfies InputSchema;
 
-type AbandonResult = { jobId: string; name: string; state: string; movedTo: string | null };
+type AbandonResult = { jobId: string; name: string; deploymentId: string; state: string; movedTo: string | null };
 
 /**
  * `mm ensv2 jobs abandon <jobId>` — set a job's record aside so a fresh job
@@ -29,7 +31,10 @@ export default class EnsV2JobsAbandon extends PluginCommand<AbandonResult> {
   protected readonly pluginCommandId = "ensv2:jobs:abandon";
 
   async execute(io: CommandIO): Promise<AbandonResult> {
-    const { jobId, force } = await io.resolveInputs(inputs);
+    const { jobId, force, deployment: deploymentFlag } = await io.resolveInputs(inputs);
+    // Addressed by id, never by deployment; the flag is accepted for uniformity
+    // and validated so a typo is caught. The job's own deployment is reported.
+    parseDeploymentKey(deploymentFlag);
     const store = defaultStore();
     const file = await store.get(jobId.trim());
     if (!file) throw new CommandError("E_JOB_NOT_FOUND", `No job ${jobId} in ${store.dir}.`, "Run `mm ensv2 jobs list --all` to see the jobs on this machine.");
@@ -41,10 +46,10 @@ export default class EnsV2JobsAbandon extends PluginCommand<AbandonResult> {
       );
     }
     const movedTo = await store.abandon(file.job.jobId);
-    return { jobId: file.job.jobId, name: file.job.facts.normalizedName, state: file.job.state, movedTo };
+    return { jobId: file.job.jobId, name: file.job.facts.normalizedName, deploymentId: file.job.deploymentId, state: file.job.state, movedTo };
   }
 
   override successHint(r: AbandonResult): string {
-    return `Job ${r.jobId} (${r.name}, ${r.state}) set aside${r.movedTo ? ` at ${r.movedTo}` : ""}. A new provision for ${r.name} will start a fresh job.`;
+    return `Job ${r.jobId} (${r.name} on ${r.deploymentId}, ${r.state}) set aside${r.movedTo ? ` at ${r.movedTo}` : ""}. A new provision for ${r.name} will start a fresh job.`;
   }
 }

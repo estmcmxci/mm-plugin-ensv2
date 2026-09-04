@@ -1,12 +1,18 @@
 /**
- * Minimal ABIs, human-readable form. Signatures taken from the deployed
- * Sepolia artifacts (contracts-v2-post-audit-2/contracts/deployments/sepolia),
- * NOT from that repo's `contracts/src/`, which describes a different
- * generation of the resolver and does not match the chain.
+ * Minimal ABIs, human-readable form.
+ *
+ * g1 (the `beta` deployment) signatures are taken from the deployed Sepolia
+ * artifacts (contracts-v2-post-audit-2/contracts/deployments/sepolia), NOT
+ * from that repo's `contracts/src/`.
+ *
+ * g2 (the `hackathon` deployment) signatures are taken from that same repo's
+ * `contracts/src/` — which IS the generation the ETHOnline deployment runs —
+ * and every selector was then confirmed present in the DEPLOYED bytecode on
+ * 2026-09-04 before being used. The confirmations are noted per ABI below.
  */
 import { parseAbi } from "viem";
 
-/** UpgradableUniversalResolverProxy — the public entry point. */
+/** UpgradableUniversalResolverProxy — the public entry point (both generations). */
 export const universalResolverAbi = parseAbi([
   "function supportsInterface(bytes4 interfaceId) external view returns (bool)",
   "function findCanonicalRegistry(bytes name) external view returns (address)",
@@ -14,6 +20,36 @@ export const universalResolverAbi = parseAbi([
   "function findParentRegistry(bytes name) external view returns (address)",
   "function findResolver(bytes name) external view returns ((address resolver, bytes32 node, uint256 offset))",
 ]);
+
+/**
+ * g2's `UniversalHelper` (contracts/src/universalResolver/UniversalHelper.sol).
+ * On g2 the registry-navigation calls moved OFF the Universal Resolver: the UR
+ * REVERTS on findCanonicalRegistry / findParentRegistry / findExactRegistry and
+ * this contract answers them instead. Both halves confirmed live 2026-09-04
+ * against 0x1d4cd754…: findCanonicalRegistry("eth") -> 0x1D78834d…,
+ * findParentRegistry("eth") -> 0xe7f0D572…, while the same calls on
+ * 0xd26f2040… revert.
+ */
+export const universalHelperAbi = parseAbi([
+  "function findCanonicalRegistry(bytes name) external view returns (address)",
+  "function findExactRegistry(bytes name) external view returns (address)",
+  "function findParentRegistry(bytes name) external view returns (address)",
+]);
+
+/**
+ * g2's `IUniversalResolverV2`
+ * (contracts/src/universalResolver/interfaces/IUniversalResolverV2.sol). It is
+ * a one-function interface, so its ERC-165 id IS `isENSv2()`'s selector —
+ * 0x1a6cc9f0, exactly as that file's own `@dev Interface selector` note says,
+ * and as `toFunctionSelector("isENSv2()")` recomputes.
+ *
+ * Confirmed live 2026-09-04: the hackathon UR proxy answers
+ * supportsInterface(0x1a6cc9f0) == true and isENSv2() == true; the beta UR
+ * answers supportsInterface(0x1a6cc9f0) == false and REVERTS on isENSv2().
+ * Symmetrically g1's id (0xf99a5e06) is false on the hackathon UR. That
+ * asymmetry is what makes the two generations' gates un-crossable.
+ */
+export const universalResolverV2ProbeAbi = parseAbi(["function isENSv2() external view returns (bool)"]);
 
 /** PermissionedRegistry — root, .eth, and every UserRegistry share this surface. */
 export const registryAbi = parseAbi([
@@ -114,14 +150,60 @@ export const resolverAbi = parseAbi([
 ]);
 
 /**
- * PermissionedResolver — the DEPLOYED generation. Three-argument initializer,
+ * PermissionedResolver initializer — g1 (`beta`). Three-argument form,
  * selector 0x7058b559, confirmed by bytecode presence on
  * 0x9EAe5C2730a7dD16BDD1DeE6421a1B91e3B0365e (2026-09-03). The two-argument
- * form in ensemble-cli, and the Grant[] form in contracts-v2-post-audit-2/src,
- * both belong to other generations and revert here.
+ * form in ensemble-cli, and the Grant[] form below, belong to other
+ * generations and revert here.
  */
 export const permissionedResolverAbi = parseAbi([
   "function initialize(address admin, uint256 roleBitmap, bytes[] setters) external",
+]);
+
+/**
+ * Resolver record surface — g2 (`hackathon`). From
+ * contracts/src/resolver/PermissionedResolver.sol and its
+ * interfaces/setters/*.sol. There is no `setAddr` on this generation at all:
+ * the address setter is ENSIP-9-shaped, `setAddress(name, coinType,
+ * addressBytes)`, and both setters key on the DNS-ENCODED NAME rather than the
+ * namehash (the resolver namehashes it itself in `_ensureRecord`).
+ *
+ * Selector presence on the deployed implementation 0xa9d3814A… (2026-09-04,
+ * 15 511 bytes of code):
+ *     setAddress(bytes,uint256,bytes)   0xb4436dde  present
+ *     setText(bytes,string,string)      0xc7279f88  present
+ *     multicall(bytes[])                0xac9650d8  present
+ *     setAddr(bytes32,address)          0xd5fa2b00  ABSENT
+ *     setText(bytes32,string,string)    0x10f13a8c  ABSENT
+ * The g1 shapes are absent, so a g1 multicall cannot silently succeed here.
+ *
+ * READS are unchanged: `AbstractRecordResolver.resolve(name, data)` still
+ * dispatches on the standard `addr(bytes32)` / `text(bytes32,string)` profile
+ * selectors, so the Universal-Resolver read path (and viem's getEnsAddress /
+ * getEnsText) works on both generations without a branch. Confirmed live
+ * 2026-09-04 through the hackathon UR for
+ * bnmig-0441-3w-fuse-owner-resolver-0-r01.eth: addr -> 0x66e3b531…,
+ * text("avatar") -> "" (present-but-empty, i.e. absent).
+ */
+export const permissionedResolverG2Abi = parseAbi([
+  "function setAddress(bytes name, uint256 coinType, bytes addressBytes) external",
+  "function setText(bytes name, string key, string value) external",
+  "function multicall(bytes[] data) external returns (bytes[] results)",
+]);
+
+/**
+ * PermissionedResolver initializer — g2 (`hackathon`), from
+ * IPermissionedResolverInitializable.sol: `initialize(Grant[] grants, bytes[]
+ * calls)`, where `Grant` is `(address account, uint256 roleBitmap)` and each
+ * grant is applied on ROOT_RESOURCE. Selector 0x33cc44a0, confirmed present in
+ * 0xa9d3814A…'s bytecode on 2026-09-04; g1's 0x7058b559 is ABSENT there.
+ *
+ * Proven end to end the same day: `eth_call` of
+ * VerifiableFactory.deployProxy(impl, ownedResolverSalt(owner), thisCalldata)
+ * on the hackathon factory returns the address this plugin predicts.
+ */
+export const permissionedResolverG2InitAbi = parseAbi([
+  "function initialize((address account, uint256 roleBitmap)[] grants, bytes[] calls) external",
 ]);
 
 /**

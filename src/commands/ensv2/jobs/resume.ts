@@ -1,7 +1,8 @@
 import { CommandError, type CommandIO, InputFieldType, type InputSchema, PluginCommand, schemaToArgs, schemaToFlags } from "@metamask/agent-wallet/plugin";
 import { isAddressEqual, parseUnits } from "viem";
 import { erc20Abi } from "../../../lib/abis.js";
-import { parseChainId, requireEnsV2 } from "../../../lib/gate.js";
+import { deploymentByDeploymentId } from "../../../lib/deployments.js";
+import { parseChainId, parseDeploymentKey, requireDeployment, requireEnsV2 } from "../../../lib/gate.js";
 import { defaultStore, engineDeps, jobErrorToCommandError, summarize } from "../../../lib/hostjobs.js";
 import { runJob } from "../../../lib/provision.js";
 import { selectedEvmAddress } from "../../../lib/wallet.js";
@@ -15,6 +16,7 @@ const inputs = {
   maxSpend: { type: InputFieldType.Text, flag: "max-spend", message: "Raise the job's spend ceiling to this amount in payment-token units (e.g. 8.5); lowering is ignored", required: false, prompt: false },
   verifyRpc: { type: InputFieldType.Text, flag: "verify-rpc", message: "Second, independent RPC URL for the final verification", required: false, prompt: false },
   chain: { type: InputFieldType.Text, flag: "chain", message: "EVM chain id (default 11155111, Sepolia)", required: false, prompt: false },
+  deployment: { type: InputFieldType.Text, flag: "deployment", message: "ENSv2 deployment: beta (default, the canonical Sepolia beta) or hackathon (ENS Labs' ETHOnline deployment, a newer contract generation)", required: false, prompt: false },
 } satisfies InputSchema;
 
 /**
@@ -23,6 +25,11 @@ const inputs = {
  * its completion from chain first; nothing paid or irreversible is resent
  * unless the chain shows it undone — and a step recorded as submitted with no
  * chain evidence stays halted until you pass --resubmit-unconfirmed.
+ *
+ * A job can only be resumed under the deployment it was created on. Both
+ * deployments are chain 11155111, so `--deployment` — not `--chain` — is what
+ * distinguishes them, and a mismatch is refused with E_UNSUPPORTED_DEPLOYMENT
+ * before any RPC call.
  */
 export default class EnsV2JobsResume extends PluginCommand<ProvisionResult> {
   static override description = "Resume a provisioning job by id. Re-derives every step from chain; never repeats a paid step blindly.";
@@ -42,9 +49,25 @@ export default class EnsV2JobsResume extends PluginCommand<ProvisionResult> {
       const file = await store.get(v.jobId.trim());
       if (!file) throw new CommandError("E_JOB_NOT_FOUND", `No job ${v.jobId} in ${store.dir}.`, "Run `mm ensv2 jobs list --all`.");
       const chainId = parseChainId(v.chain);
+      const deploymentKey = parseDeploymentKey(v.deployment);
       if (file.job.chain !== `eip155:${chainId}`) throw new CommandError("E_UNSUPPORTED_NETWORK", `Job ${file.job.jobId} is for ${file.job.chain}, not eip155:${chainId}.`, "Omit --chain or pass the job's chain.");
+      // Both pinned deployments live on chain 11155111, so the chain check above
+      // does NOT separate them. Refuse here, before any RPC, rather than letting
+      // the engine observe a beta job's name against the hackathon registry.
+      // (runJob asserts the same thing again; this is the early, cheap refusal.)
+      const table = requireDeployment(chainId, deploymentKey);
+      if (file.job.deploymentId !== table.deploymentId) {
+        const owning = deploymentByDeploymentId(file.job.deploymentId);
+        throw new CommandError(
+          "E_UNSUPPORTED_DEPLOYMENT",
+          `Job ${file.job.jobId} was created under deployment ${file.job.deploymentId}; this run is on ${table.deploymentId} (--deployment ${table.key}).`,
+          owning
+            ? `Names, registries and resolvers are per deployment. Re-run as \`mm ensv2 jobs resume ${file.job.jobId} --deployment ${owning.key}\`.`
+            : `That deployment is not in this plugin build's table. Nothing was read or sent.`,
+        );
+      }
       const client = this.ctx.publicClient(chainId);
-      const { deployment: d } = await requireEnsV2(client, chainId);
+      const { deployment: d } = await requireEnsV2(client, chainId, deploymentKey);
       const owner = selectedEvmAddress(this.ctx.walletStateManager.read());
       if (!owner) throw new CommandError("ENSV2_NO_WALLET", "No EVM wallet is selected.", "Run `mm wallet` to create or select one, then retry.");
       if (!isAddressEqual(owner, file.job.facts.owner)) {

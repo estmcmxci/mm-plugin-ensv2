@@ -10,7 +10,7 @@ import {
 import { formatUnits, parseUnits } from "viem";
 import { erc20Abi } from "../../lib/abis.js";
 import { SEPOLIA_CHAIN_ID } from "../../lib/deployments.js";
-import { parseChainId, requireEnsV2, toCommandError } from "../../lib/gate.js";
+import { parseChainId, parseDeploymentKey, requireEnsV2, toCommandError } from "../../lib/gate.js";
 import { buildMint, tokenState } from "../../lib/registrar.js";
 import { selectedEvmAddress } from "../../lib/wallet.js";
 
@@ -26,6 +26,13 @@ const inputs = {
     type: InputFieldType.Text,
     flag: "chain",
     message: "EVM chain id (default 11155111, Sepolia)",
+    required: false,
+    prompt: false,
+  },
+  deployment: {
+    type: InputFieldType.Text,
+    flag: "deployment",
+    message: "ENSv2 deployment: beta (default, the canonical Sepolia beta) or hackathon (ENS Labs' ETHOnline deployment, a newer contract generation)",
     required: false,
     prompt: false,
   },
@@ -59,15 +66,16 @@ export default class EnsV2Faucet extends PluginCommand<FaucetResult> {
   protected readonly pluginCommandId = "ensv2:faucet";
 
   async execute(io: CommandIO): Promise<FaucetResult> {
-    const { amount, chain } = await io.resolveInputs(inputs);
+    const { amount, chain, deployment: deploymentFlag } = await io.resolveInputs(inputs);
     const chainId = parseChainId(chain);
+    const deploymentKey = parseDeploymentKey(deploymentFlag);
     if (chainId !== SEPOLIA_CHAIN_ID) {
       throw new CommandError("ENSV2_FAUCET_SEPOLIA_ONLY", "The faucet mints a mock token that only exists on Sepolia.", "Omit --chain.");
     }
     const client = this.ctx.publicClient(chainId);
 
     try {
-      const { deployment } = await requireEnsV2(client, chainId);
+      const { deployment } = await requireEnsV2(client, chainId, deploymentKey);
       const owner = selectedEvmAddress(this.ctx.walletStateManager.read());
       if (!owner) throw new CommandError("ENSV2_NO_WALLET", "No EVM wallet is selected.", "Run `mm wallet` to create or select one, then retry.");
 

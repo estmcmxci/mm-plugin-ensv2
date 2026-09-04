@@ -152,14 +152,27 @@ export type Plan =
   | { kind: "new"; file: JobFile; quoteTotal: bigint; alreadyRegistered: boolean };
 
 /**
- * Jobs for (chain, name, owner), newest first. By default only jobs that can
- * still run: a completed or terminal job is a record, not a claim on the name,
- * and must not block a new job for it (the same inputs are found by id anyway).
+ * Jobs for (chain, deployment, name, owner), newest first. By default only jobs
+ * that can still run: a completed or terminal job is a record, not a claim on
+ * the name, and must not block a new job for it (the same inputs are found by
+ * id anyway).
+ *
+ * `deploymentId` matters because both pinned deployments live on chain
+ * 11155111: `agent.eth` on the beta and `agent.eth` on the hackathon are
+ * different names on different registries, and one's job must never be
+ * mistaken for the other's. Omitting it searches across deployments.
  */
-export async function jobsFor(store: JobStore, chainId: number, normalizedName: string, owner: Address, opts: { includeTerminal?: boolean } = {}): Promise<JobFile[]> {
+export async function jobsFor(
+  store: JobStore,
+  chainId: number,
+  normalizedName: string,
+  owner: Address,
+  opts: { includeTerminal?: boolean; deploymentId?: string } = {},
+): Promise<JobFile[]> {
   const all = await store.list();
   return all
     .filter((f) => f.job.chain === `eip155:${chainId}` && f.job.facts.normalizedName === normalizedName && isAddressEqual(f.job.facts.owner, owner))
+    .filter((f) => opts.deploymentId === undefined || f.job.deploymentId === opts.deploymentId)
     .filter((f) => opts.includeTerminal || !TERMINAL_STATES.has(f.job.state))
     .sort((a, b) => {
       const ta = TERMINAL_STATES.has(a.job.state) ? 1 : 0;
@@ -180,6 +193,31 @@ export class PlanRefused extends Error {
     super(error.message);
     this.name = "PlanRefused";
   }
+}
+
+/**
+ * Refuse a job that belongs to a different pinned deployment. Throws
+ * ProvisionHalt with the frozen `E_UNSUPPORTED_DEPLOYMENT` code (errors 1.0.0)
+ * — the code that names exactly this condition — WITHOUT writing to the job
+ * file: the job is intact and correct, it is this run's `--deployment` that is
+ * wrong.
+ */
+export function assertJobDeployment(deployment: EnsV2Deployment, file: JobFile): void {
+  if (file.job.deploymentId === deployment.deploymentId) return;
+  throw new ProvisionHalt(
+    programError({
+      code: "E_UNSUPPORTED_DEPLOYMENT",
+      category: "deployment",
+      retryability: "requires_user_action",
+      message: `Job ${file.job.jobId} was created under deployment ${file.job.deploymentId}; this run is on ${deployment.deploymentId} (--deployment ${deployment.key}). Names, registries and resolvers are per deployment; refusing to resume it against the wrong one.`,
+      recoveryAction: {
+        kind: "inspect_job_status",
+        description: `Re-run with the job's own deployment, then resume: \`mm ensv2 jobs resume ${file.job.jobId} --deployment <the job's deployment>\`. \`mm ensv2 jobs show ${file.job.jobId}\` prints its deploymentId.`,
+      },
+      evidence: { jobId: file.job.jobId, intentHash: file.job.intentHash, deploymentId: file.job.deploymentId },
+    }),
+    file,
+  );
 }
 
 /**
@@ -292,6 +330,10 @@ async function planProvisionInner(deps: Pick<EngineDeps, "chain" | "deployment" 
   //    terminal_failed is reported as such by runJob). Otherwise an ACTIVE job for the name is resumed when the
   //    user-controlled inputs match (the ceiling may differ), or refused when they do not. Completed and terminal
   //    jobs never block a new job for the name.
+  // The intent's EIP-712 salt is keccak256(deploymentId), so the intent hash —
+  // and therefore the job id — already differs between the two deployments for
+  // otherwise identical inputs. Everything below additionally scopes by
+  // deploymentId, so the two never see each other's jobs.
   const jobId = jobIdFor(chainId, normalized, owner, intent.eip712.intentHash);
   const byId = await deps.store.get(jobId);
   if (byId) return { kind: "existing", file: byId, inputsMatch: true };
@@ -299,7 +341,7 @@ async function planProvisionInner(deps: Pick<EngineDeps, "chain" | "deployment" 
   // job is the same: an ACTIVE job with these inputs is resumed, a COMPLETED one is the no-op. Only a
   // terminal_failed record is skipped here; it never blocks a fresh attempt.
   const inputs = userInputsOf(intent);
-  const all = await jobsFor(deps.store, chainId, normalized, owner, { includeTerminal: true });
+  const all = await jobsFor(deps.store, chainId, normalized, owner, { includeTerminal: true, deploymentId: d.deploymentId });
   const sameInputs = all.filter((f) => userInputsOf(f.intent) === inputs);
   const active = sameInputs.find((f) => !TERMINAL_STATES.has(f.job.state)) ?? sameInputs.find((f) => f.job.state === "completed");
   if (active) return { kind: "existing", file: active, inputsMatch: true };
@@ -847,6 +889,12 @@ export async function runJob(deps: EngineDeps, file: JobFile, opts: RunOptions =
   if (!intentIsConsistent(file.intent)) {
     throw new Error(`job ${file.job.jobId}: the stored intent's hashes do not recompute; refusing to execute it`);
   }
+  // A job belongs to the deployment it was created under. Both pinned
+  // deployments share chain 11155111, so the chain check alone would let a
+  // beta job be resumed against the hackathon registry (and vice versa) —
+  // where the name may be unregistered, the resolver a different generation,
+  // and the commitment worthless. Refuse before anything is observed or sent.
+  assertJobDeployment(deps.deployment, file);
   if (file.job.state === "completed") return file;
   if (file.job.state === "terminal_failed" || file.job.state === "cancelled" || file.job.state === "expired") {
     const blocked = file.job.resume?.blockedBy;
@@ -1230,7 +1278,7 @@ export async function runJob(deps: EngineDeps, file: JobFile, opts: RunOptions =
           build: async () => {
             const cur = await chain.currentRecords(rt.name, Object.keys(desired.texts));
             const diff = diffRecords(rt.name, cur, desired);
-            const { calldata } = buildRecordsMulticall(intent.resolverConfig.address, namehash(rt.name), diff.changes);
+            const { calldata } = buildRecordsMulticall(d, { resolver: intent.resolverConfig.address, name: rt.name, node: namehash(rt.name) }, diff.changes);
             const keys = Object.keys(diff.changes);
             return { calldata: calldata!, summary: `Set ${keys.length} record${keys.length === 1 ? "" : "s"} on ${rt.name}: ${keys.join(", ")}`, details: Object.fromEntries(keys.map((k) => [k, diff.changes[k]!.to.length > 60 ? diff.changes[k]!.to.slice(0, 57) + "…" : diff.changes[k]!.to])) };
           },

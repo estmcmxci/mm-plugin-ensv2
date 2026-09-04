@@ -17,13 +17,20 @@
  *
  * Writes are batched into one resolver multicall so one approval covers the
  * whole record set, and only keys whose on-chain value differs are written.
+ *
+ * Generations: READS are identical — `AbstractRecordResolver.resolve(name,
+ * data)` on g2 still dispatches the standard `addr(bytes32)` /
+ * `text(bytes32,string)` profile selectors, so the Universal-Resolver read path
+ * needs no branch (confirmed live on the hackathon deployment 2026-09-04).
+ * WRITES differ: g2 has no `setAddr` at all and keys its setters on the
+ * DNS-encoded name. That difference is confined to `setterCall()`.
  */
 import { encodeFunctionData, getAddress, isAddress, isAddressEqual, zeroAddress, type Address, type Hex, type PublicClient } from "viem";
 import { namehash } from "viem/ens";
-import { resolverAbi } from "./abis.js";
+import { permissionedResolverG2Abi, resolverAbi } from "./abis.js";
 import type { EnsV2Deployment } from "./deployments.js";
 import { ensip25Key, parseEnsip25Key, type Ensip25Ref } from "./erc7930.js";
-import { normalizeName } from "./names.js";
+import { dnsEncode, normalizeName } from "./names.js";
 import { ReadError, ensClient, resolverInfo } from "./reads.js";
 import { ownedResolverStatus } from "./resolver.js";
 import type { Calldata } from "./registrar.js";
@@ -202,15 +209,51 @@ export function diffRecords(name: string, current: { addr: RecordRead; texts: Re
   return { changes, unchanged };
 }
 
-/** One resolver multicall covering exactly the changed keys; null when nothing changes. Pure. */
-export function buildRecordsMulticall(resolver: Address, node: Hex, changes: RecordsPlan["changes"]): { calldata: Calldata | null; calls: number } {
-  const calls: Hex[] = [];
-  for (const [key, c] of Object.entries(changes)) {
-    if (key === "addr") calls.push(encodeFunctionData({ abi: resolverAbi, functionName: "setAddr", args: [node, getAddress(c.to)] }));
-    else calls.push(encodeFunctionData({ abi: resolverAbi, functionName: "setText", args: [node, key, c.to] }));
+/** ENSIP-9 / SLIP-44 coin type for Ethereum mainnet addresses. What `addr(node)` reads on both generations. */
+export const COIN_TYPE_ETH = 60n;
+
+/**
+ * The single setter call for one changed key, in the shape this deployment's
+ * resolver implementation actually exposes. Pure.
+ *
+ * g1 keys on the NAMEHASH:      setAddr(bytes32 node, address)
+ *                               setText(bytes32 node, string, string)
+ * g2 keys on the DNS-ENCODED NAME, and its address setter is ENSIP-9 shaped:
+ *                               setAddress(bytes name, uint256 coinType, bytes addressBytes)
+ *                               setText(bytes name, string, string)
+ *
+ * Each generation's selectors are absent from the other's implementation
+ * bytecode (checked on both), so a call built for the wrong generation reverts
+ * inside the multicall — which propagates the first error — rather than
+ * writing a partial record set.
+ */
+function setterCall(d: EnsV2Deployment, name: string, node: Hex, key: string, value: string): Hex {
+  if (d.generation === "g2") {
+    const dns = dnsEncode(name);
+    return key === "addr"
+      ? encodeFunctionData({ abi: permissionedResolverG2Abi, functionName: "setAddress", args: [dns, COIN_TYPE_ETH, getAddress(value)] })
+      : encodeFunctionData({ abi: permissionedResolverG2Abi, functionName: "setText", args: [dns, key, value] });
   }
+  return key === "addr"
+    ? encodeFunctionData({ abi: resolverAbi, functionName: "setAddr", args: [node, getAddress(value)] })
+    : encodeFunctionData({ abi: resolverAbi, functionName: "setText", args: [node, key, value] });
+}
+
+/**
+ * One resolver multicall covering exactly the changed keys; null when nothing
+ * changes. Pure. `multicall(bytes[])` is 0xac9650d8 on both generations
+ * (confirmed in both implementations' bytecode), so only the inner calls differ.
+ */
+export function buildRecordsMulticall(
+  d: EnsV2Deployment,
+  target: { resolver: Address; name: string; node: Hex },
+  changes: RecordsPlan["changes"],
+): { calldata: Calldata | null; calls: number } {
+  const abi = d.generation === "g2" ? permissionedResolverG2Abi : resolverAbi;
+  const calls: Hex[] = [];
+  for (const [key, c] of Object.entries(changes)) calls.push(setterCall(d, target.name, target.node, key, c.to));
   const calldata: Calldata | null = calls.length
-    ? { to: resolver, data: encodeFunctionData({ abi: resolverAbi, functionName: "multicall", args: [calls] }), value: 0n }
+    ? { to: target.resolver, data: encodeFunctionData({ abi, functionName: "multicall", args: [calls] }), value: 0n }
     : null;
   return { calldata, calls: calls.length };
 }
@@ -236,7 +279,7 @@ export async function planRecords(client: PublicClient, d: EnsV2Deployment, rawN
   const [addr, ...texts] = await Promise.all([desired.addr ? readAddr(ens, d, name) : Promise.resolve<RecordRead>({ status: "absent", value: null }), ...keys.map((k) => readText(ens, d, name, k))]);
   const current = { addr, texts: Object.fromEntries(keys.map((k, i) => [k, texts[i]!])) };
   const { changes, unchanged } = diffRecords(name, current, desired);
-  const { calldata, calls } = buildRecordsMulticall(resolver, node, changes);
+  const { calldata, calls } = buildRecordsMulticall(d, { resolver, name, node }, changes);
   return { name, node, resolver, changes, unchanged, calldata, calls };
 }
 

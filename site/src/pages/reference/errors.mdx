@@ -25,6 +25,7 @@ Every failure is a typed `CommandError` with a stable code, a message, and a **h
 | `ENSV2_DEPLOY_FAILED` | Wallet returned a non-transaction result. | Report this; the executor contract changed. |
 | `ENSV2_DEPLOY_PENDING` | Transaction … reported status "…" but no code exists at … yet. | If the request is awaiting approval, complete it (see `mm wallet requests list`) and re-run; the command is idempotent. |
 | `ENSV2_DEPLOY_UNVERIFIED` | Code exists at … but VerifiableFactory does not attest it runs …. | Do not use this resolver. Report this with the transaction hash: |
+| `ENSV2_DEPLOYMENT_INCOMPLETE` | Deployment … is generation g2 but declares no universalHelper. | Registry navigation on this generation lives on UniversalHelper; refusing to guess. |
 | `ENSV2_DURATION_TOO_SHORT` | Duration …s is below the registrar minimum of …s (… days). | Pass a longer --years (0.08 ≈ 28 days). |
 | `ENSV2_FACTORY_MISMATCH` | VerifiableFactory.proxyLogic() is …, configured …. | The predicted address would be wrong. Refusing to deploy against a factory the deployment table disagrees with. |
 | `ENSV2_FAUCET_FAILED` | Mint failed: … | Retry; nothing was minted. |
@@ -47,7 +48,7 @@ Every failure is a typed `CommandError` with a stable code, a message, and a **h
 | `ENSV2_NO_OWN_RESOLVER` | … has $&#123;info.kind === "inherited" ? |  |
 | `ENSV2_NO_PRIMARY_NAME` | No primary ENSv2 name is set for …. | Reverse resolution only works when the address owner has set a primary name that forward-resolves back to it. Set one with `ensv2 primary set &lt;name>`. |
 | `ENSV2_NO_WALLET` | No EVM wallet is selected. | Run `mm wallet` to create or select one, then retry. |
-| `ENSV2_NOT_ACTIVE` | ENSv2 is not active on chain …: …. |  |
+| `ENSV2_NOT_ACTIVE` | ENSv2 (…, generation …) is not active on chain …: …. |  |
 | `ENSV2_NOT_CONTROLLER` | … does not control agent #… (the name's current owner does). | Run this from the wallet that owns the name. |
 | `ENSV2_NOT_OWNER` | … is owned by …, not this wallet (…). | The adapter's control check requires the token owner to call register(). |
 | `ENSV2_NOTHING_TO_SET` | No records specified. | Pass at least one of --addr/--description/--url/--avatar/--alias/--context/--endpoints/--link-agent. |
@@ -68,7 +69,8 @@ Every failure is a typed `CommandError` with a stable code, a message, and a **h
 | `ENSV2_SET_URI_FAILED` | setAgentURI failed: … | Nothing changed. Fix the cause and re-run; the command is idempotent. |
 | `ENSV2_SET_URI_UNVERIFIED` | tx … landed but the registry still reports agentURI '…'. | Wait a block and run `ensv2 agent info`. |
 | `ENSV2_TX_FAILED` | …: non-transaction result. | Report this. |
-| `ENSV2_UNSUPPORTED_CHAIN` | No ENSv2 deployment is configured for chain …. | ENSv2 is a Sepolia beta (chain 11155111). Mainnet stays disabled until a canonical production deployment exists. |
+| `ENSV2_UNKNOWN_DEPLOYMENT` | '…' (from …) is not a known ENSv2 deployment. | Pass one of: …. \ |
+| `ENSV2_UNSUPPORTED_CHAIN` | Deployment '…' is on chain …, not …. | Omit --chain (it defaults to …) or pass --chain …. |
 | `ENSV2_WRONG_WALLET` | Job … belongs to …; the selected wallet is …. | Select the wallet that started the job (`mm wallet`), then retry. |
 
 The durable-jobs engine (`provision`, `jobs`) additionally reports the program's frozen `E_*` codes from `schemas/errors.schema.json` (vendored 1.0.0), for example `E_RECEIPT_UNAVAILABLE` (a step was submitted and its outcome is unknown — halt, check chain, never resend automatically) and `E_IDEMPOTENCY_CONFLICT`.
