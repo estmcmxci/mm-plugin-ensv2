@@ -36,6 +36,7 @@ Every failure is a typed `CommandError` with a stable code, a message, and a **h
 | `ENSV2_INVALID_CHAIN` | '…' is not a chain id. | Pass a numeric EVM chain id, e.g. 11155111 for Sepolia. |
 | `ENSV2_INVALID_DURATION` | '…' is not a positive number of years. | Example: --years 1 or --years 0.5 |
 | `ENSV2_INVALID_ENDPOINTS` | '…' is not &lt;protocol>=&lt;url>. | Example: --endpoints mcp=https://agent.example/mcp,web=https://agent.example |
+| `ENSV2_JOB_ACTIVE` | Job … is … and can still run; it may hold a live commitment that only its secret can complete. | Resume it with \ |
 | `ENSV2_LOOKUP_FAILED` | Could not read addr for …: … | Retry; refusing to write over an unreadable record. |
 | `ENSV2_NAME_NOT_AVAILABLE` | … is not available to register. | Registered, in grace, or reserved from ENSv1 pre-migration. Check `ensv2 whois`. |
 | `ENSV2_NAME_NOT_FOUND` | '…' does not resolve to an address. |  |
