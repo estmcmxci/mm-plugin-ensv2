@@ -1,5 +1,6 @@
 import { CommandError, type CommandIO, InputFieldType, type InputSchema, PluginCommand, schemaToArgs, schemaToFlags } from "@metamask/agent-wallet/plugin";
-import { isAddressEqual } from "viem";
+import { isAddressEqual, parseUnits } from "viem";
+import { erc20Abi } from "../../../lib/abis.js";
 import { parseChainId, requireEnsV2 } from "../../../lib/gate.js";
 import { defaultStore, engineDeps, jobErrorToCommandError, summarize } from "../../../lib/hostjobs.js";
 import { runJob } from "../../../lib/provision.js";
@@ -11,6 +12,7 @@ const b = (flag: string, message: string) => ({ type: InputFieldType.Boolean, fl
 const inputs = {
   jobId: { type: InputFieldType.Text, flag: "job-id", message: "Job id (see `ensv2 jobs list`)", required: true, index: 0 },
   resubmitUnconfirmed: b("resubmit-unconfirmed", "You have confirmed a step recorded as submitted never landed and is not pending; allow it to be sent again"),
+  maxSpend: { type: InputFieldType.Text, flag: "max-spend", message: "Raise the job's spend ceiling to this amount in payment-token units (e.g. 8.5); lowering is ignored", required: false, prompt: false },
   verifyRpc: { type: InputFieldType.Text, flag: "verify-rpc", message: "Second, independent RPC URL for the final verification", required: false, prompt: false },
   chain: { type: InputFieldType.Text, flag: "chain", message: "EVM chain id (default 11155111, Sepolia)", required: false, prompt: false },
 } satisfies InputSchema;
@@ -48,8 +50,17 @@ export default class EnsV2JobsResume extends PluginCommand<ProvisionResult> {
       if (!isAddressEqual(owner, file.job.facts.owner)) {
         throw new CommandError("ENSV2_WRONG_WALLET", `Job ${file.job.jobId} belongs to ${file.job.facts.owner}; the selected wallet is ${owner}.`, "Select the wallet that started the job (`mm wallet`), then retry.");
       }
+      let raiseCeilingTo: bigint | undefined;
+      if (v.maxSpend) {
+        const decimals = await client.readContract({ address: d.paymentToken, abi: erc20Abi, functionName: "decimals" });
+        try {
+          raiseCeilingTo = parseUnits(v.maxSpend, decimals);
+        } catch {
+          throw new CommandError("ENSV2_INVALID_AMOUNT", `'${v.maxSpend}' is not a valid amount.`, "Example: --max-spend 8.5");
+        }
+      }
       const deps = await engineDeps({ ctx: this.ctx, io, commandId: "ensv2:jobs:resume", client, deployment: d, store, verifyRpc: v.verifyRpc });
-      const done = await runJob(deps, file, { resubmitUnconfirmed: v.resubmitUnconfirmed });
+      const done = await runJob(deps, file, { resubmitUnconfirmed: v.resubmitUnconfirmed, ...(raiseCeilingTo !== undefined ? { raiseCeilingTo } : {}) });
       return toResult(done.job, true, summarize(done, store));
     } catch (error) {
       throw jobErrorToCommandError(error, store);

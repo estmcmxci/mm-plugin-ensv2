@@ -15,10 +15,11 @@
  *              funds, but it is the only thing that lets a commitment be
  *              completed, so it is never printed or logged.
  *
- * This supersedes the v0.3 checkpoint in pending.ts: the register step's
- * tuple now lives inside the job, and `ensv2 register` runs as a job too.
+ * `ensv2 provision` runs on this. `ensv2 register` is unchanged and keeps its
+ * own v0.3 checkpoint in pending.ts; a checkpoint for a label is adopted into
+ * a job the first time `provision` runs for that label.
  */
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Address, Hex } from "viem";
@@ -306,6 +307,8 @@ export type PrivateCommitment = {
 
 export type JobFile = {
   format: typeof JOB_FILE_FORMAT;
+  /** Store-managed save counter for compare-and-swap. Not part of any program schema. Missing on files written before it existed (read as 0). */
+  revision?: number;
   /** The program-shaped intent this job executes. Recomputed and checked on load. */
   intent: ProvisioningIntent;
   job: JobRecord;
@@ -340,28 +343,83 @@ export function redactJobFile(file: JobFile): { format: string; intent: Provisio
 
 // ---------------------------------------------------------------------------
 // Stores
+//
+// Two concurrent runs for one name must not both commit. The store therefore
+// (1) creates a job file exclusively — a second creator fails instead of
+// clobbering the first run's secret — and (2) writes every later save as a
+// compare-and-swap on the file's `revision`: a run that loaded revision N may
+// only write N+1 while the stored file is still at N. A run that loses the
+// race stops without writing.
+
+/** Another process created the same job first. Resume that job instead. */
+export class JobExistsError extends Error {
+  constructor(readonly jobId: string) {
+    super(`job ${jobId} already exists; another run created it first`);
+    this.name = "JobExistsError";
+  }
+}
+
+/** The job file changed underneath this run (another process is running the job). This run must stop without writing. */
+export class ConcurrentModificationError extends Error {
+  constructor(
+    readonly jobId: string,
+    readonly expectedRevision: number,
+    readonly actualRevision: number | null,
+  ) {
+    super(`job ${jobId} was modified by another process (expected revision ${expectedRevision}, found ${actualRevision ?? "none"})`);
+    this.name = "ConcurrentModificationError";
+  }
+}
 
 export interface JobStore {
   get(jobId: string): Promise<JobFile | null>;
-  /** Validates, then persists atomically. */
-  put(file: JobFile): Promise<void>;
+  /** Exclusive create: validates, then persists; throws JobExistsError if a file for this id exists. */
+  create(file: JobFile): Promise<void>;
+  /** Compare-and-swap on `file.revision`: validates, refuses with ConcurrentModificationError if the stored revision differs, then bumps and persists. */
+  update(file: JobFile): Promise<void>;
   list(): Promise<JobFile[]>;
+  /** Set a job aside: no longer found by get/list, kept for the record. Returns where it went, or null if there was nothing. */
+  abandon(jobId: string): Promise<string | null>;
   /** Human-readable location for messages; null when not file-backed. */
   location(jobId: string): string | null;
 }
 
+const rev = (f: JobFile) => f.revision ?? 0;
+
 export class MemoryJobStore implements JobStore {
   private readonly files = new Map<string, string>();
+  readonly abandoned = new Map<string, string>();
   async get(jobId: string): Promise<JobFile | null> {
     const raw = this.files.get(jobId);
-    return raw ? (JSON.parse(raw) as JobFile) : null;
+    if (!raw) return null;
+    const f = JSON.parse(raw) as JobFile;
+    f.revision ??= 0;
+    return f;
   }
-  async put(file: JobFile): Promise<void> {
+  async create(file: JobFile): Promise<void> {
     validateJobFile(file);
+    if (this.files.has(file.job.jobId)) throw new JobExistsError(file.job.jobId);
+    file.revision = 0;
+    this.files.set(file.job.jobId, JSON.stringify(file));
+  }
+  async update(file: JobFile): Promise<void> {
+    validateJobFile(file);
+    const raw = this.files.get(file.job.jobId);
+    const stored = raw ? (JSON.parse(raw) as JobFile) : null;
+    if (!stored || rev(stored) !== rev(file)) throw new ConcurrentModificationError(file.job.jobId, rev(file), stored ? rev(stored) : null);
+    file.revision = rev(file) + 1;
     this.files.set(file.job.jobId, JSON.stringify(file));
   }
   async list(): Promise<JobFile[]> {
     return [...this.files.values()].map((raw) => JSON.parse(raw) as JobFile);
+  }
+  async abandon(jobId: string): Promise<string | null> {
+    const raw = this.files.get(jobId);
+    if (!raw) return null;
+    this.files.delete(jobId);
+    const where = `${jobId}.abandoned`;
+    this.abandoned.set(where, raw);
+    return where;
   }
   location(): null {
     return null;
@@ -371,6 +429,8 @@ export class MemoryJobStore implements JobStore {
 export const DEFAULT_JOBS_DIR = join(homedir(), ".mm-plugin-ensv2", "jobs");
 
 const JOB_ID_RE = /^[a-z0-9][a-z0-9._-]{0,255}$/;
+/** A lock older than this is a crash leftover and may be broken. */
+const LOCK_STALE_MS = 60_000;
 
 export class FileJobStore implements JobStore {
   constructor(readonly dir: string = DEFAULT_JOBS_DIR) {}
@@ -379,23 +439,71 @@ export class FileJobStore implements JobStore {
     return join(this.dir, `${jobId}.json`);
   }
 
+  private read(p: string): JobFile {
+    const file = JSON.parse(readFileSync(p, "utf8")) as JobFile;
+    if (file.format !== JOB_FILE_FORMAT) throw new Error(`${p}: unknown job file format ${String((file as { format?: unknown }).format)}`);
+    file.revision ??= 0;
+    return file;
+  }
+
   async get(jobId: string): Promise<JobFile | null> {
     if (!JOB_ID_RE.test(jobId)) return null;
     const p = this.location(jobId);
     if (!existsSync(p)) return null;
-    const file = JSON.parse(readFileSync(p, "utf8")) as JobFile;
-    if (file.format !== JOB_FILE_FORMAT) throw new Error(`${p}: unknown job file format ${String((file as { format?: unknown }).format)}`);
-    return file;
+    return this.read(p);
   }
 
-  async put(file: JobFile): Promise<void> {
+  async create(file: JobFile): Promise<void> {
     validateJobFile(file);
     mkdirSync(this.dir, { recursive: true, mode: 0o700 });
     const p = this.location(file.job.jobId);
-    const tmp = `${p}.${process.pid}.tmp`;
-    writeFileSync(tmp, JSON.stringify(file, null, 2), { mode: 0o600 });
-    chmodSync(tmp, 0o600);
-    renameSync(tmp, p);
+    file.revision = 0;
+    try {
+      // O_EXCL: the first creator wins; a concurrent second run must resume, never overwrite a secret it does not hold.
+      writeFileSync(p, JSON.stringify(file, null, 2), { flag: "wx", mode: 0o600 });
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === "EEXIST") throw new JobExistsError(file.job.jobId);
+      throw e;
+    }
+    chmodSync(p, 0o600);
+  }
+
+  /** Short exclusive lock around read-compare-write so two updaters cannot both pass the revision check. */
+  private withLock<T>(jobId: string, fn: () => T): T {
+    const lock = `${this.location(jobId)}.lock`;
+    const take = () => writeFileSync(lock, String(process.pid), { flag: "wx", mode: 0o600 });
+    try {
+      take();
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+      const age = Date.now() - statSync(lock).mtimeMs;
+      if (age < LOCK_STALE_MS) throw new ConcurrentModificationError(jobId, -1, null);
+      unlinkSync(lock);
+      take();
+    }
+    try {
+      return fn();
+    } finally {
+      try {
+        unlinkSync(lock);
+      } catch {
+        /* already gone */
+      }
+    }
+  }
+
+  async update(file: JobFile): Promise<void> {
+    validateJobFile(file);
+    const p = this.location(file.job.jobId);
+    this.withLock(file.job.jobId, () => {
+      const stored = existsSync(p) ? this.read(p) : null;
+      if (!stored || rev(stored) !== rev(file)) throw new ConcurrentModificationError(file.job.jobId, rev(file), stored ? rev(stored) : null);
+      file.revision = rev(file) + 1;
+      const tmp = `${p}.${process.pid}.tmp`;
+      writeFileSync(tmp, JSON.stringify(file, null, 2), { mode: 0o600 });
+      chmodSync(tmp, 0o600);
+      renameSync(tmp, p);
+    });
   }
 
   async list(): Promise<JobFile[]> {
@@ -403,13 +511,22 @@ export class FileJobStore implements JobStore {
     const out: JobFile[] = [];
     for (const f of readdirSync(this.dir).filter((f) => f.endsWith(".json")).sort()) {
       try {
-        const file = JSON.parse(readFileSync(join(this.dir, f), "utf8")) as JobFile;
-        if (file.format === JOB_FILE_FORMAT) out.push(file);
+        out.push(this.read(join(this.dir, f)));
       } catch {
         /* skip unreadable files; `jobs show` on the id reports the parse error */
       }
     }
     return out;
+  }
+
+  async abandon(jobId: string): Promise<string | null> {
+    if (!JOB_ID_RE.test(jobId)) return null;
+    const p = this.location(jobId);
+    if (!existsSync(p)) return null;
+    // Not a .json name any more, so get/list stop seeing it; the record (and its secret) stays for inspection.
+    const where = `${p}.abandoned-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+    renameSync(p, where);
+    return where;
   }
 }
 

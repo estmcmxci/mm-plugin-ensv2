@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { SEPOLIA } from "../dist/lib/deployments.js";
-import { MemoryJobStore, redactJobFile, validateJobFile } from "../dist/lib/jobs.js";
+import { ConcurrentModificationError, JobExistsError, MemoryJobStore, redactJobFile, validateJobFile } from "../dist/lib/jobs.js";
 import { ProvisionHalt, adoptLegacyCommitment, desiredRecords, jobsFor, observeJob, planProvision, runJob, stepsFor } from "../dist/lib/provision.js";
 import { SCHEMA_IDS, validateSchema } from "../dist/lib/schema.js";
 import { MockChain, mockExecutor, secondEndpoint } from "./mock-chain.mjs";
@@ -51,7 +51,7 @@ function world(opts = {}) {
 /** Plan and persist a new job (or return the existing one). */
 async function startJob(w, req = request()) {
   const plan = await planProvision({ chain: w.chain, deployment: SEPOLIA, store: w.store }, req);
-  if (plan.kind === "new") await w.store.put(plan.file);
+  if (plan.kind === "new") await w.store.create(plan.file);
   return plan;
 }
 
@@ -222,7 +222,7 @@ test("kill during commitment_wait → resume waits out the remaining age and nev
   const reg = onDisk.job.steps.find((s) => s.step === "registration_submit");
   reg.state = "pending"; // as if the crash happened in the wait loop, before register began
   onDisk.job.steps.find((s) => s.step === "commitment_wait").state = "in_progress";
-  await w.store.put(onDisk);
+  await w.store.update(onDisk);
   const second = mockExecutor(w.chain, OWNER);
   const file = await runJob(w.deps(second), onDisk);
   assertCompleted(file);
@@ -355,6 +355,7 @@ test("a confirmed revert marks the step failed/retryable and is retried only by 
   const rec = halt.file.job.steps.find((s) => s.step === "registration_submit");
   assert.equal(rec.state, "failed");
   assert.equal(rec.receipts[0].receiptStatus, "reverted");
+  assert.equal(rec.receipts[0].transactionHash, w.chain.applied.find((t) => t.status === "reverted").hash, "the hash was recovered from the thrown TX_REVERTED message");
   assert.equal(w.chain.entry("durable"), null);
 
   const second = mockExecutor(w.chain, OWNER);
@@ -510,7 +511,7 @@ test("a v0.3 pending-registrations checkpoint is adopted into the job so its com
   const plan = await startJob(w, request({ identity: null, records: { addr: null, texts: {} }, resolverMode: "reuse-existing" }));
   // startJob persisted the fresh file; adopt and re-persist as the register command does.
   assert.equal(adoptLegacyCommitment(plan.file, legacy), true);
-  await w.store.put(plan.file);
+  await w.store.update(plan.file);
   assert.equal(plan.file.job.facts.commitmentHash, legacy.commitment);
   const exec = mockExecutor(w.chain, OWNER);
   const file = await runJob(w.deps(exec), plan.file);
@@ -549,4 +550,239 @@ test.after(() => {
     const rows = matrixRows.map((r) => `| \`${r.step}\` | ${r.killPoint} | ${r.observed} | ${r.action} | ${r.submissions} | ${r.result} |`);
     console.log(["| Step | Kill point | What resume observed on chain | Action taken | Submissions on resume | Result |", "|---|---|---|---|---:|---|", ...rows].join("\n"));
   }
+});
+
+// ---------------------------------------------------------------------------
+// Review findings (fix/review-findings). One regression test per finding.
+
+test("F1: a returned tracking-expired status (no hash) is indeterminate — the landed bind is found on resume, never re-minted", async () => {
+  const w = world();
+  const first = mockExecutor(w.chain, OWNER, { trackingExpired: "identity_bind" });
+  const plan = await startJob(w);
+  const halt = await expectHalt(runJob(w.deps(first), plan.file));
+  assert.equal(halt.error.code, "E_IDENTITY_BINDING_FAILED");
+  assert.equal(halt.error.retryability, "indeterminate");
+  assert.match(halt.error.message, /CONFIRMATION_TRACKING_EXPIRED/);
+  assert.equal(halt.file.job.steps.find((s) => s.step === "identity_bind").state, "in_progress", "the step stays in flight, never `failed`");
+  assert.equal(halt.file.job.facts.executionPlane.ref, "wjob-5", "the wallet job handle is recorded");
+  assert.equal(w.chain.agents.length, 1);
+  const second = mockExecutor(w.chain, OWNER);
+  const file = await runJob(w.deps(second), await w.store.get(plan.file.job.jobId));
+  assertCompleted(file);
+  assert.equal(count(second.calls, "identity_bind"), 0);
+  assert.equal(w.chain.agents.length, 1, "exactly one agent: the tracking timeout did not cause a second mint");
+});
+
+test("F1: tracking-expired where the transaction never landed stays halted until --resubmit-unconfirmed", async () => {
+  const w = world();
+  const first = mockExecutor(w.chain, OWNER, { trackingExpiredLost: "registration_submit" });
+  const plan = await startJob(w);
+  const halt = await expectHalt(runJob(w.deps(first), plan.file));
+  assert.equal(halt.error.code, "E_RECEIPT_UNAVAILABLE");
+  assert.equal(halt.error.retryability, "indeterminate");
+  assert.equal(halt.file.job.steps.find((s) => s.step === "registration_submit").state, "in_progress");
+  const second = mockExecutor(w.chain, OWNER);
+  const again = await expectHalt(runJob(w.deps(second), await w.store.get(plan.file.job.jobId)));
+  assert.equal(again.error.retryability, "indeterminate");
+  assert.equal(count(second.calls, "registration_submit"), 0, "never resent without the flag");
+  const third = mockExecutor(w.chain, OWNER);
+  const file = await runJob(w.deps(third), await w.store.get(plan.file.job.jobId), { resubmitUnconfirmed: true });
+  assertCompleted(file);
+  assert.equal(count(third.calls, "registration_submit"), 1);
+});
+
+test("F2: a thrown TX_DENIED is definitely-not-broadcast → E_POLICY_DENIED, retried by the next run without a flag", async () => {
+  const w = world();
+  const first = mockExecutor(w.chain, OWNER, { deny: "registration_submit" });
+  const plan = await startJob(w);
+  const halt = await expectHalt(runJob(w.deps(first), plan.file));
+  assert.equal(halt.error.code, "E_POLICY_DENIED");
+  assert.equal(halt.error.retryability, "requires_user_action");
+  assert.doesNotMatch(halt.error.recoveryAction.description, /--resubmit-unconfirmed/, "a benign denial must not normalise the override");
+  assert.equal(halt.file.job.steps.find((s) => s.step === "registration_submit").state, "failed");
+  assert.equal(w.chain.entry("durable"), null);
+  const second = mockExecutor(w.chain, OWNER);
+  const file = await runJob(w.deps(second), await w.store.get(plan.file.job.jobId));
+  assertCompleted(file);
+  assert.equal(count(second.calls, "registration_submit"), 1);
+});
+
+test("F2: a thrown TX_EXPIRED (approval window) → E_MFA_REQUIRED, bind retried by the next run without a flag", async () => {
+  const w = world();
+  const first = mockExecutor(w.chain, OWNER, { expire: "identity_bind" });
+  const plan = await startJob(w);
+  const halt = await expectHalt(runJob(w.deps(first), plan.file));
+  assert.equal(halt.error.code, "E_MFA_REQUIRED");
+  assert.equal(halt.file.job.steps.find((s) => s.step === "identity_bind").state, "failed");
+  assert.equal(w.chain.agents.length, 0);
+  const second = mockExecutor(w.chain, OWNER);
+  const file = await runJob(w.deps(second), await w.store.get(plan.file.job.jobId));
+  assertCompleted(file);
+  assert.equal(count(second.calls, "identity_bind"), 1);
+  assert.equal(w.chain.agents.length, 1);
+});
+
+test("F2: a polling failure after submit keeps the pollingId and stays indeterminate; resume finds the landed transaction", async () => {
+  const w = world();
+  const first = mockExecutor(w.chain, OWNER, { pollTimeout: "registration_submit" });
+  const plan = await startJob(w);
+  const halt = await expectHalt(runJob(w.deps(first), plan.file));
+  assert.equal(halt.error.code, "E_RECEIPT_UNAVAILABLE");
+  assert.equal(halt.error.retryability, "indeterminate");
+  assert.match(halt.error.message, /mm wallet requests watch wjob-\d+/);
+  assert.match(halt.file.job.facts.executionPlane.ref, /^wjob-\d+$/);
+  assert.equal(halt.file.job.facts.executionPlane.kind, "metamask-agent-wallet");
+  const second = mockExecutor(w.chain, OWNER);
+  const file = await runJob(w.deps(second), await w.store.get(plan.file.job.jobId));
+  assertCompleted(file);
+  assert.equal(count(second.calls, "registration_submit"), 0);
+  assert.equal(w.chain.applied.filter((t) => t.fn === "register").length, 1);
+});
+
+test("F3: the wallet job handle (pendingJob.pollingId) is recorded on every receipt", async () => {
+  const w = world();
+  const exec = mockExecutor(w.chain, OWNER);
+  const plan = await startJob(w);
+  const file = await runJob(w.deps(exec), plan.file);
+  const receipts = file.job.steps.flatMap((s) => s.receipts ?? []);
+  assert.equal(receipts.length, 6);
+  for (const r of receipts) assert.match(r.walletJobId, /^wjob-\d+$/);
+  assert.match(file.job.facts.executionPlane.ref, /^wjob-\d+$/);
+});
+
+test("F4: a terminal job for the same inputs says how to start over; abandoning it frees the id; other inputs are never blocked by it", async () => {
+  const w = world();
+  const first = mockExecutor(w.chain, OWNER, { killAfter: "commitment_submit" });
+  const plan = await startJob(w);
+  const frozen = runJob(w.deps(first), plan.file);
+  frozen.catch(() => {});
+  await first.reached;
+  w.chain.names.set("durable", { owner: STRANGER, expiry: w.chain.time + 10_000_000, version: 0, epoch: 1, resolver: null });
+  const second = mockExecutor(w.chain, OWNER);
+  const t = await expectHalt(runJob(w.deps(second), await w.store.get(plan.file.job.jobId)));
+  assert.equal(t.file.job.state, "terminal_failed");
+
+  // Same inputs → the same id → E_JOB_TERMINAL, with the way out named. (The stranger's registration lapses first so the
+  // plan gets past availability; while the name is theirs, the plan itself refuses with E_NAME_UNAVAILABLE.)
+  w.chain.names.delete("durable");
+  const same = await planProvision({ chain: w.chain, deployment: SEPOLIA, store: w.store }, request());
+  assert.equal(same.kind, "existing");
+  const third = mockExecutor(w.chain, OWNER);
+  const blocked = await expectHalt(runJob(w.deps(third), same.file));
+  assert.equal(blocked.error.code, "E_JOB_TERMINAL");
+  assert.match(blocked.error.recoveryAction.description, new RegExp(`jobs abandon ${plan.file.job.jobId}`));
+
+  // Different inputs are not blocked by a terminal job (no E_IDEMPOTENCY_CONFLICT).
+  const other = await planProvision({ chain: w.chain, deployment: SEPOLIA, store: w.store }, request({ durationSeconds: 63072000n }));
+  assert.equal(other.kind, "new");
+
+  // Abandon frees the id; a new job with the same inputs starts fresh and the record is kept.
+  const where = await w.store.abandon(plan.file.job.jobId);
+  assert.ok(where);
+  assert.equal(await w.store.get(plan.file.job.jobId), null);
+  assert.equal(w.store.abandoned.size, 1);
+  const fresh = await planProvision({ chain: w.chain, deployment: SEPOLIA, store: w.store }, request());
+  assert.equal(fresh.kind, "new");
+  assert.equal(fresh.file.job.jobId, plan.file.job.jobId);
+});
+
+test("F4: a completed job never blocks a new job for the same name with other inputs", async () => {
+  const w = world();
+  const exec = mockExecutor(w.chain, OWNER);
+  const plan = await startJob(w);
+  await runJob(w.deps(exec), plan.file);
+  const other = await planProvision({ chain: w.chain, deployment: SEPOLIA, store: w.store }, request({ records: { addr: OWNER, texts: { description: "renamed" } } }));
+  assert.equal(other.kind, "new");
+  assert.notEqual(other.file.job.jobId, plan.file.job.jobId);
+});
+
+test("F4: the spend ceiling can be raised on resume; the intent hash follows, the job id does not", async () => {
+  const w = world();
+  const first = mockExecutor(w.chain, OWNER, { killAfter: "commitment_submit" });
+  const plan = await startJob(w);
+  const frozen = runJob(w.deps(first), plan.file);
+  frozen.catch(() => {});
+  await first.reached;
+  w.chain.price = w.chain.price * 2n;
+  const second = mockExecutor(w.chain, OWNER);
+  const halt = await expectHalt(runJob(w.deps(second), await w.store.get(plan.file.job.jobId)));
+  assert.equal(halt.error.code, "E_PRICE_EXCEEDS_MAX_SPEND");
+  assert.match(halt.error.recoveryAction.description, /--max-spend/);
+  // A lower "raise" is ignored and the job halts the same way.
+  const third = mockExecutor(w.chain, OWNER);
+  const again = await expectHalt(runJob(w.deps(third), await w.store.get(plan.file.job.jobId), { raiseCeilingTo: 1n }));
+  assert.equal(again.error.code, "E_PRICE_EXCEEDS_MAX_SPEND");
+  const before = await w.store.get(plan.file.job.jobId);
+  const fourth = mockExecutor(w.chain, OWNER);
+  const file = await runJob(w.deps(fourth), before, { raiseCeilingTo: w.chain.price });
+  assertCompleted(file);
+  assert.equal(file.intent.maxSpend.maxTotalAmount, w.chain.price.toString());
+  assert.notEqual(file.job.intentHash, plan.file.job.intentHash);
+  assert.equal(file.job.intentHash, file.intent.eip712.intentHash);
+  assert.equal(file.job.jobId, plan.file.job.jobId);
+  assert.equal(count(fourth.calls, "commitment_submit"), 0, "raising the ceiling never re-commits");
+  // A re-plan with the same user inputs still finds this job (the ceiling is not a user input).
+  const replan = await planProvision({ chain: w.chain, deployment: SEPOLIA, store: w.store }, request());
+  assert.equal(replan.kind, "existing");
+  assert.equal(replan.file.job.jobId, plan.file.job.jobId);
+});
+
+test("F5: two runs for one name cannot both create the job, and a run that loses a save race stops without writing", async () => {
+  const w = world();
+  const a = await planProvision({ chain: w.chain, deployment: SEPOLIA, store: w.store }, request());
+  const b = await planProvision({ chain: w.chain, deployment: SEPOLIA, store: w.store }, request());
+  assert.equal(a.kind, "new");
+  assert.equal(b.kind, "new");
+  assert.notEqual(a.file.private.commitment.secret, b.file.private.commitment.secret);
+  await w.store.create(a.file);
+  await assert.rejects(w.store.create(b.file), (e) => e instanceof JobExistsError);
+  assert.equal((await w.store.get(a.file.job.jobId)).private.commitment.secret, a.file.private.commitment.secret, "the first creator's secret is intact");
+
+  // Stale-revision save is refused.
+  const loadedA = await w.store.get(a.file.job.jobId);
+  const loadedB = await w.store.get(a.file.job.jobId);
+  await w.store.update(loadedA);
+  await assert.rejects(w.store.update(loadedB), (e) => e instanceof ConcurrentModificationError);
+
+  // Engine level: a run holding a stale copy halts with a conflict and leaves the store as the other run left it.
+  const exec = mockExecutor(w.chain, OWNER);
+  const stale = await w.store.get(a.file.job.jobId);
+  const done = await runJob(w.deps(exec), await w.store.get(a.file.job.jobId));
+  assertCompleted(done);
+  const exec2 = mockExecutor(w.chain, OWNER);
+  const halt = await expectHalt(runJob(w.deps(exec2), stale));
+  assert.equal(halt.error.code, "E_IDEMPOTENCY_CONFLICT");
+  assert.deepEqual(exec2.calls, []);
+  const onDisk = await w.store.get(a.file.job.jobId);
+  assert.equal(onDisk.job.state, "completed");
+  assert.equal(onDisk.revision, done.revision);
+});
+
+test("nit: a RESERVED / grace name at price_recheck is terminal E_NAME_UNAVAILABLE, not a quote revert", async () => {
+  const w = world();
+  const first = mockExecutor(w.chain, OWNER, { killAfter: "commitment_submit" });
+  const plan = await startJob(w);
+  const frozen = runJob(w.deps(first), plan.file);
+  frozen.catch(() => {});
+  await first.reached;
+  w.chain.reserved = new Set(["durable"]);
+  const second = mockExecutor(w.chain, OWNER);
+  const halt = await expectHalt(runJob(w.deps(second), await w.store.get(plan.file.job.jobId)));
+  assert.equal(halt.error.code, "E_NAME_UNAVAILABLE");
+  assert.equal(halt.error.retryability, "terminal");
+  assert.equal(count(second.calls, "registration_submit"), 0);
+});
+
+test("nit: an RPC failure inside a transaction step is recorded on the job, not thrown past it", async () => {
+  const w = world();
+  const exec = mockExecutor(w.chain, OWNER);
+  const plan = await startJob(w);
+  const broken = new Proxy(w.chain, { get: (t, p) => (p === "resolverStatus" ? async () => { throw new Error("RPC 503"); } : typeof t[p] === "function" ? t[p].bind(t) : t[p]) });
+  const halt = await expectHalt(runJob({ ...w.deps(exec), chain: broken }, plan.file));
+  assert.equal(halt.error.code, "E_INTERNAL");
+  assert.equal(halt.error.retryability, "retryable");
+  assert.equal(halt.file.job.steps.find((s) => s.step === "resolver_deploy").state, "failed");
+  assert.equal(halt.file.job.resume.blockedBy.code, "E_INTERNAL");
+  const file = await runJob(w.deps(mockExecutor(w.chain, OWNER)), await w.store.get(plan.file.job.jobId));
+  assertCompleted(file);
 });

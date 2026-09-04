@@ -181,7 +181,8 @@ function validateNode(schema: Schema, data: unknown, path: string, ctx: Ctx): st
     }
     if (s.additionalProperties !== undefined) {
       for (const k of Object.keys(data)) {
-        if (k in props) continue;
+        // Own keys only: `in` would let constructor / toString / hasOwnProperty / __proto__ through additionalProperties:false.
+        if (Object.prototype.hasOwnProperty.call(props, k)) continue;
         if (s.additionalProperties === false) errors.push(`${path}: unexpected property "${k}"`);
         else errors.push(...validateNode(s.additionalProperties as Schema, data[k], `${path}/${k}`, ctx));
       }

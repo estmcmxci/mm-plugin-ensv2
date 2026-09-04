@@ -11,7 +11,8 @@ import { erc20Abi } from "./abis.js";
 import { viemProvisionChain, type ProvisionChain } from "./chain.js";
 import type { EnsV2Deployment } from "./deployments.js";
 import { toCommandError } from "./gate.js";
-import { FileJobStore, type JobFile, type JobStore, type ProgramError } from "./jobs.js";
+import { FileJobStore, JobExistsError, type JobFile, type JobStore, type ProgramError } from "./jobs.js";
+import { walletResultToSubmitResult, type WalletResultLike } from "./executor.js";
 import { PlanRefused, ProvisionHalt, type EngineDeps, type Submit } from "./provision.js";
 
 /** Independent second endpoint for the final verification. Flag, then env, then the public Sepolia RPC. */
@@ -36,15 +37,8 @@ export async function submitVia(ctx: PluginCommandContext, io: CommandIO, comman
       },
       { waitForReceipt: true, signal: io.signal },
     );
-    if (r.kind !== "transaction") throw new Error(`${req.summary}: the wallet returned a non-transaction result`);
-    const pending = r.pendingJob as { id?: string } | undefined;
-    return {
-      ...(r.hash ? { hash: r.hash as `0x${string}` } : {}),
-      status: r.status,
-      ...(r.failureCode ? { failureCode: r.failureCode } : {}),
-      ...(r.failureDescription ? { failureDescription: r.failureDescription } : {}),
-      ...(pending?.id ? { walletJobId: pending.id } : {}),
-    };
+    // pendingJob is a fox-sdk PendingJobEntry: its handle is `pollingId` (the id `mm wallet requests watch` takes).
+    return walletResultToSubmitResult(r as WalletResultLike);
   };
 }
 
@@ -84,6 +78,9 @@ export function programErrorToCommandError(e: ProgramError, store?: JobStore): C
 export function jobErrorToCommandError(error: unknown, store?: JobStore): CommandError {
   if (error instanceof ProvisionHalt) return programErrorToCommandError(error.error, store);
   if (error instanceof PlanRefused) return programErrorToCommandError(error.error, store);
+  if (error instanceof JobExistsError) {
+    return new CommandError("E_IDEMPOTENCY_CONFLICT", `${error.message}. Nothing was written by this run.`, `Run the same command again to resume job ${error.jobId}. Never run two provisioning processes for one name at once.`);
+  }
   return toCommandError(error);
 }
 
