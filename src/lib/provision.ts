@@ -165,12 +165,35 @@ function halt(err: Omit<ProgramError, "occurredAt">, state: JobState = "retryabl
 
 const iso = (unix: number) => nowIso(new Date(unix * 1000));
 
+/** Thrown by planProvision when no job can be created for the request. `error` is a schema-valid program error. Nothing was persisted or sent. */
+export class PlanRefused extends Error {
+  constructor(readonly error: ProgramError) {
+    super(error.message);
+    this.name = "PlanRefused";
+  }
+}
+
 /**
  * Plan a provisioning run without touching the wallet or the store. Returns
  * either the existing job for these inputs (resume / no-op / conflict) or a
- * fully formed, unsaved new job.
+ * fully formed, unsaved new job. Throws PlanRefused when the inputs cannot
+ * become a job at all.
  */
-export async function planProvision(deps: Pick<EngineDeps, "chain" | "deployment" | "store" | "now" | "log">, req: ProvisionRequest): Promise<Plan> {
+export type PlanOptions = {
+  /** Refuse a NEW job when the wallet cannot pay the quote (default true). The read-only planner check turns this off to show the plan regardless. */
+  checkFunding?: boolean;
+};
+
+export async function planProvision(deps: Pick<EngineDeps, "chain" | "deployment" | "store" | "now" | "log">, req: ProvisionRequest, opts: PlanOptions = {}): Promise<Plan> {
+  try {
+    return await planProvisionInner(deps, req, opts);
+  } catch (e) {
+    if (e instanceof Halt) throw new PlanRefused(programError({ ...e.err, occurredAt: nowIso((deps.now ?? (() => new Date()))()) }));
+    throw e;
+  }
+}
+
+async function planProvisionInner(deps: Pick<EngineDeps, "chain" | "deployment" | "store" | "now" | "log">, req: ProvisionRequest, opts: PlanOptions): Promise<Plan> {
   const d = deps.deployment;
   const chainId = d.chainId;
   const now = deps.now ?? (() => new Date());
@@ -276,7 +299,7 @@ export async function planProvision(deps: Pick<EngineDeps, "chain" | "deployment
   }
 
   // 5. Funding preflight for a brand-new job. Nothing durable exists yet, so refuse rather than record a blocked job.
-  if (!alreadyRegistered && quoteTotal > 0n) {
+  if (opts.checkFunding !== false && !alreadyRegistered && quoteTotal > 0n) {
     const { balance } = await deps.chain.tokenState(owner);
     if (balance < quoteTotal) {
       halt({ code: "E_INSUFFICIENT_FUNDS", category: "funding", retryability: "requires_user_action", message: `Registering ${normalized} costs ${quoteTotal} token units; this wallet holds ${balance}.`, recoveryAction: { kind: "fund_wallet_and_resume", description: "On Sepolia, run `mm ensv2 faucet` to mint test USDC, then run the same command again." } }, "terminal_failed");

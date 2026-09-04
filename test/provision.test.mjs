@@ -492,7 +492,12 @@ test("register standalone: reuse-existing resolver, identity none, no records", 
 
 test("register standalone refuses when the resolver is not deployed", async () => {
   const w = world();
-  await assert.rejects(startJob(w, request({ identity: null, records: { addr: null, texts: {} }, resolverMode: "reuse-existing" })), (e) => e.err?.code === "E_RESOLVER_NOT_PREPARED" || /E_RESOLVER_NOT_PREPARED|resolver/.test(String(e.message)));
+  await assert.rejects(startJob(w, request({ identity: null, records: { addr: null, texts: {} }, resolverMode: "reuse-existing" })), (e) => {
+    assert.equal(e.name, "PlanRefused");
+    assert.equal(e.error.code, "E_RESOLVER_NOT_PREPARED");
+    assert.ok(validateSchema(SCHEMA_IDS.errors, e.error).ok);
+    return true;
+  });
 });
 
 test("a v0.3 pending-registrations checkpoint is adopted into the job so its commitment is kept", async () => {
