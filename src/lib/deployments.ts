@@ -30,6 +30,15 @@ export const SEPOLIA_CHAIN_ID = 11155111;
 
 export type EnsV2Deployment = {
   readonly chainId: number;
+  /**
+   * Stable identifier of this pinned deployment, carried through every job,
+   * receipt and verification result (common-primitives deploymentId). The
+   * program's fixtures and the WS04 live rehearsal both name the Sepolia beta
+   * `ensv2-sepolia-2026-07-30`; no deployment manifest has been generated yet
+   * (WS01), so this table IS the manifest content and the id is kept in step
+   * with the program's usage.
+   */
+  readonly deploymentId: string;
   /** Public entry point. UpgradableUniversalResolverProxy; same address as mainnet. */
   readonly universalResolver: `0x${string}`;
   /** Root of the registry hierarchy. */
@@ -63,6 +72,7 @@ export type EnsV2Deployment = {
 
 export const SEPOLIA: EnsV2Deployment = {
   chainId: SEPOLIA_CHAIN_ID,
+  deploymentId: "ensv2-sepolia-2026-07-30",
   universalResolver: "0xeEeEEEeE14D718C2B47D9923Deab1335E144EeEe",
   rootRegistry: "0x8115186E8f2E0B0281e86ab91f0f48Ba90364354",
   registry: "0xBDC85dD5b15D7ecb354cd7cb6f2c50b4f2c4F0E2",

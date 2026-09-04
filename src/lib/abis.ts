@@ -85,11 +85,18 @@ export const adapter8004Abi = parseAbi([
 /** IERCAgentBindings.TokenStandard. The ENSv2 registry is an ERC-1155 singleton that exposes ownerOf(), so ERC721 is the standard that works for it. */
 export const TOKEN_STANDARD = { ERC721: 0, ERC1155: 1, ERC6909: 2, ERC1155F: 3, ERC6909F: 4 } as const;
 
-/** ERC-8004 IdentityRegistry — ERC-721 subset used for reads. */
+/**
+ * ERC-8004 IdentityRegistry — ERC-721 subset used for reads, plus the
+ * reserved-metadata accessor the verifier needs. getMetadata(uint256,string)
+ * is behind the registry's proxy (the selector is not in the proxy bytecode);
+ * it was confirmed live on 2026-09-03 by calling it for agent 10058 with key
+ * "agent-binding" and receiving the 20-byte Adapter8004 proxy address back.
+ */
 export const identityRegistryAbi = parseAbi([
   "function ownerOf(uint256 tokenId) external view returns (address)",
   "function tokenURI(uint256 tokenId) external view returns (string)",
   "function balanceOf(address owner) external view returns (uint256)",
+  "function getMetadata(uint256 agentId, string metadataKey) external view returns (bytes)",
 ]);
 
 /**

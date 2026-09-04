@@ -76,11 +76,11 @@ export async function bindPlan(client: PublicClient, d: EnsV2Deployment, name: s
 }
 
 /** Pull the agentId out of a register() receipt. */
-export function agentIdFromReceipt(receipt: Pick<TransactionReceipt, "logs">, adapter: Address): bigint | null {
+export function agentIdFromReceipt(receipt: Pick<TransactionReceipt, "logs"> | { logs: readonly { address: Address; data: Hex; topics: readonly Hex[] }[] }, adapter: Address): bigint | null {
   for (const log of receipt.logs) {
     if (!isAddressEqual(log.address, adapter)) continue;
     try {
-      const ev = decodeEventLog({ abi: [AGENT_BOUND], data: log.data, topics: log.topics });
+      const ev = decodeEventLog({ abi: [AGENT_BOUND], data: log.data, topics: log.topics as [Hex, ...Hex[]] });
       if (ev.eventName === "AgentBound") return ev.args.agentId;
     } catch {
       /* not our event */
@@ -169,13 +169,14 @@ export async function findAgentIdsForName(
   d: EnsV2Deployment,
   name: string,
   opts: { maxChunks?: number; chunk?: bigint; all?: boolean } = {},
-): Promise<{ agentIds: bigint[]; scannedFrom: bigint; scannedTo: bigint; currentTokenId: bigint }> {
+): Promise<{ agentIds: bigint[]; registeredBy: Record<string, Address>; scannedFrom: bigint; scannedTo: bigint; currentTokenId: bigint }> {
   const w = await whois(client, d, name);
   const current = BigInt(w.tokenId);
   const chunk = opts.chunk ?? 9999n;
   const maxChunks = opts.maxChunks ?? 60;
   const latest = await client.getBlockNumber();
   const found: bigint[] = [];
+  const registeredBy: Record<string, Address> = {};
   let hi = latest;
   let lo = hi;
   for (let i = 0; i < maxChunks && hi > 0n; i++) {
@@ -183,10 +184,13 @@ export async function findAgentIdsForName(
     const logs = await client.getLogs({ address: d.adapter8004, event: AGENT_BOUND, args: { tokenContract: w.registry }, fromBlock: lo, toBlock: hi });
     for (const l of logs.reverse()) {
       // Match the name's canonical id (upper 224 bits): the bound id may be a stale version of the same name.
-      if ((l.args.tokenId! >> 32n) === (current >> 32n)) found.push(l.args.agentId!);
+      if ((l.args.tokenId! >> 32n) === (current >> 32n)) {
+        found.push(l.args.agentId!);
+        if (l.args.registeredBy) registeredBy[l.args.agentId!.toString()] = l.args.registeredBy;
+      }
     }
     if (found.length && !opts.all) break;
     hi = lo - 1n;
   }
-  return { agentIds: found, scannedFrom: lo, scannedTo: latest, currentTokenId: current };
+  return { agentIds: found, registeredBy, scannedFrom: lo, scannedTo: latest, currentTokenId: current };
 }
