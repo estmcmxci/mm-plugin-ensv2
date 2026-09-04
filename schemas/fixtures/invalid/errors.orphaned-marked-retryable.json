@@ -1,0 +1,12 @@
+{
+  "code": "E_IDENTITY_BINDING_ORPHANED",
+  "category": "identity",
+  "retryability": "retryable",
+  "message": "orphaned",
+  "occurredAt": "2026-08-25T19:03:00Z",
+  "recoveryAction": {
+    "kind": "resume_identity_only",
+    "description": "resume"
+  },
+  "$expectedError": "an orphaned binding has no resumption path; marking it retryable loops a consumer forever"
+}

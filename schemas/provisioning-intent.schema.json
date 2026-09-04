@@ -1,0 +1,527 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:mm-ens-identity:schema:provisioning-intent:1.0.0",
+  "title": "Provisioning intent",
+  "description": "The single authorization object consumed by BOTH execution modes. Direct and x402 execution consume the same intent and are verified by the same verifier. The intent is what the wallet signs; its EIP-712 projection is defined in eip712-provisioning-intent.json and the two are frozen together. Per D-008 the custodyMode enum here is the full superset; P-004 governs only which modes a provider may advertise, so this schema is not gated on P-004.",
+  "version": "1.0.0",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/noSecrets"
+    },
+    {
+      "if": {
+        "properties": {
+          "payment": {
+            "const": "direct"
+          }
+        },
+        "required": [
+          "payment"
+        ]
+      },
+      "then": {
+        "properties": {
+          "custodyMode": {
+            "const": "direct"
+          }
+        },
+        "not": {
+          "required": [
+            "provider"
+          ]
+        },
+        "$comment": "Direct execution is self-executed by the owner's wallet. It cannot carry a provider binding and cannot express a sponsored or custodial mode."
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "payment": {
+            "const": "x402"
+          }
+        },
+        "required": [
+          "payment"
+        ]
+      },
+      "then": {
+        "required": [
+          "provider"
+        ],
+        "properties": {
+          "custodyMode": {
+            "enum": [
+              "sponsored-to-owner",
+              "provider-custody-transfer-last"
+            ]
+          }
+        },
+        "$comment": "A sponsored intent must name the provider it is valid at. Provider binding is part of the replay boundary: a signed intent is not portable to a different provider."
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "identity": {
+            "const": "none"
+          }
+        },
+        "required": [
+          "identity"
+        ]
+      },
+      "then": {
+        "properties": {
+          "identityConfigHash": {
+            "const": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "identity": {
+            "const": "erc8004"
+          }
+        },
+        "required": [
+          "identity"
+        ]
+      },
+      "then": {
+        "properties": {
+          "identityConfigHash": {
+            "not": {
+              "const": "0x0000000000000000000000000000000000000000000000000000000000000000"
+            }
+          }
+        },
+        "$comment": "Identity is opt-in but first-class: when requested it is committed to by the signature, not attached later out of band."
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "resolverConfig": {
+            "properties": {
+              "mode": {
+                "const": "deploy-owned"
+              }
+            },
+            "required": [
+              "mode"
+            ]
+          }
+        },
+        "required": [
+          "resolverConfig"
+        ]
+      },
+      "then": {
+        "properties": {
+          "resolverConfig": {
+            "required": [
+              "address"
+            ]
+          }
+        }
+      },
+      "$comment": "deploy-owned means the owned resolver address is PREDICTED before the commitment is taken, so it is known at signing time and must be present. A resume reuses this exact value rather than re-predicting it, which is what provisioning-job.facts.resolverAddress requires."
+    },
+    {
+      "if": {
+        "properties": {
+          "identity": {
+            "const": "erc8004"
+          }
+        },
+        "required": [
+          "identity"
+        ]
+      },
+      "then": {
+        "properties": {
+          "identityConfig": {
+            "required": [
+              "adapterProxy",
+              "adapterImplementation",
+              "bindingStandard"
+            ]
+          }
+        }
+      },
+      "$comment": "When identity is requested the binding target must be pinned to an exact implementation and standard, not just a proxy address."
+    },
+    {
+      "if": {
+        "properties": {
+          "identityConfig": {
+            "properties": {
+              "anchorKind": {
+                "const": "resource"
+              }
+            },
+            "required": [
+              "anchorKind"
+            ]
+          }
+        },
+        "required": [
+          "identityConfig"
+        ]
+      },
+      "then": {
+        "properties": {
+          "identityConfig": {
+            "properties": {
+              "bindingStandard": {
+                "not": {
+                  "enum": [
+                    "erc721",
+                    "erc1155",
+                    "erc6909",
+                    "erc1155f",
+                    "erc6909f",
+                    "contract",
+                    "contract-ownable"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "$comment": "A resource anchor is not satisfiable by any binding standard defined today. Every currently-defined standard resolves ownership through a token ID or a contract, none of which can honour an anchor whose whole purpose is to remain stable while the token ID changes. Signing anchorKind resource against one of them would authorize a binding that cannot be performed. No ENSv2 resource-capable standard exists upstream and none is invented here (P-005), so for v0 an erc8004 intent names a token-ID anchor. Written as a negated set rather than an allowlist, so when upstream appends a resource-capable standard it falls outside the negation automatically and THIS CLAUSE NEEDS NO EDIT; only the bindingStandard enum in common-primitives grows, which is additive. WS04 verified the constraint against unruggable-labs/adapter at 75fd305 and it holds for all seven values for two distinct reasons: standards 0-4 resolve control through the bound token ID, which is the thing a resource anchor exists to outlive, and standards 5-6 hard-revert NonZeroTokenIdForContract for any nonzero token ID, so a resource cannot even be stored under them."
+    }
+  ],
+  "required": [
+    "schemaVersion",
+    "deploymentId",
+    "chain",
+    "name",
+    "owner",
+    "durationSeconds",
+    "resolverConfigHash",
+    "rolesConfigHash",
+    "payment",
+    "custodyMode",
+    "identity",
+    "identityConfigHash",
+    "maxSpend",
+    "nonce",
+    "expiry"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0.0"
+    },
+    "deploymentId": {
+      "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/deploymentId",
+      "description": "Signed, so an intent authorized against one deployment cannot be replayed against another."
+    },
+    "chain": {
+      "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/caip2"
+    },
+    "name": {
+      "type": "object",
+      "required": [
+        "normalized",
+        "labelhash"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/ensName"
+        },
+        "normalized": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/ensName",
+          "description": "ENSIP-15 normalized form. The normalized form is what is signed; the raw input is retained only for display."
+        },
+        "labelhash": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/hash32"
+        }
+      }
+    },
+    "owner": {
+      "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/address",
+      "description": "Final owner and controller of the name. For a custodial mode this is still the end state, not the interim holder."
+    },
+    "durationSeconds": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "resolverConfigHash": {
+      "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/hash32",
+      "description": "Commitment to the resolver choice and the record set. Hashed rather than inlined so the signed message stays fixed-size while the record set stays arbitrary. The expanded form travels in resolverConfig and must hash to this value."
+    },
+    "resolverConfig": {
+      "type": "object",
+      "description": "Expanded, unsigned-but-committed resolver configuration. A consumer recomputes its hash and rejects a mismatch.",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "enum": [
+            "deploy-owned",
+            "reuse-existing",
+            "explicit-address"
+          ]
+        },
+        "address": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/address"
+        },
+        "initializeForwardAddress": {
+          "type": "boolean",
+          "description": "Required postcondition for a usable identity. A registered name with a zero resolver does not satisfy the program's definition of success."
+        },
+        "records": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "kind",
+              "key",
+              "value"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "enum": [
+                  "text",
+                  "addr",
+                  "contenthash"
+                ]
+              },
+              "key": {
+                "type": "string"
+              },
+              "value": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "payment": {
+      "enum": [
+        "direct",
+        "x402"
+      ]
+    },
+    "custodyMode": {
+      "description": "Full custody superset, fixed by D-008. direct: the owner's wallet executes and holds throughout. sponsored-to-owner: a provider funds execution and the name is never held by the provider. provider-custody-transfer-last: the provider registers into its own control and transfers to the owner as the final step, which means the owner is exposed to provider custody for a window and this MUST be disclosed in the quote. A provider that does not advertise the requested mode rejects the intent with E_CUSTODY_MODE_UNSUPPORTED before taking payment.",
+      "enum": [
+        "direct",
+        "sponsored-to-owner",
+        "provider-custody-transfer-last"
+      ]
+    },
+    "identity": {
+      "enum": [
+        "none",
+        "erc8004"
+      ]
+    },
+    "identityConfigHash": {
+      "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/hash32",
+      "description": "Commitment to the identity configuration. The all-zero hash means identity is none."
+    },
+    "identityConfig": {
+      "type": "object",
+      "description": "Expanded identity configuration. Must hash to identityConfigHash.",
+      "additionalProperties": false,
+      "properties": {
+        "adapterProxy": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/address"
+        },
+        "erc8004Registry": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/address"
+        },
+        "agentUri": {
+          "type": "string"
+        },
+        "publishEnsipRecords": {
+          "type": "boolean"
+        },
+        "controllerAddress": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/address"
+        },
+        "bindingStandard": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/bindingStandard"
+        },
+        "adapterImplementation": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/address",
+          "description": "Exact implementation address the signer authorizes. adapterProxy alone does not pin behaviour: it is an upgradeable UUPS proxy whose implementation can change between signing and execution. An address is checkable; a minimum-version string is only a claim."
+        },
+        "anchorKind": {
+          "enum": [
+            "resource",
+            "token-id"
+          ],
+          "description": "Anchor the binding must use. Gate: P-005; D-009 selects resource."
+        }
+      }
+    },
+    "maxSpend": {
+      "type": "object",
+      "description": "Hard ceiling authorized by the signer. Price is re-read immediately before the irreversible step and execution aborts with E_PRICE_EXCEEDS_MAX_SPEND rather than exceeding this.",
+      "required": [
+        "asset",
+        "maxTotalAmount"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "asset": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/address"
+        },
+        "maxRegistrationAmount": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/uint256String"
+        },
+        "maxProviderFeeAmount": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/uint256String"
+        },
+        "maxTotalAmount": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/uint256String"
+        },
+        "maxGasWei": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/uint256String"
+        }
+      }
+    },
+    "nonce": {
+      "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/uint256String",
+      "description": "Per-signer replay guard. Part of the replay boundary together with signer, chain, deploymentId, provider and expiry."
+    },
+    "expiry": {
+      "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/unixSeconds",
+      "description": "After this instant the intent is unusable. An expired intent must be re-authorized, never silently extended."
+    },
+    "provider": {
+      "type": "object",
+      "description": "Provider this intent is valid at. Required for x402 and forbidden for direct.",
+      "required": [
+        "providerId",
+        "url"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "providerId": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/hash32",
+          "description": "keccak256 of the CANONICAL provider URL as defined in eip712-provisioning-intent.json under canonicalProviderUrl. Signed, so the intent is not portable between providers. Because it is inside the replay boundary, an ambiguous normalization rule would fail every signed intent closed rather than some of them, so the rule is fully specified rather than left to convention."
+        },
+        "url": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/httpsUrl"
+        },
+        "quoteId": {
+          "type": "string",
+          "description": "Quote this intent was authorized against, when one was issued."
+        }
+      }
+    },
+    "idempotencyKey": {
+      "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/hash32",
+      "description": "EXACTLY the EIP-712 intentHash, verbatim, with no transformation. Previously this was an unspecified derivation, which meant two implementations could disagree about whether two requests were the same request. The whole point of the key is that both sides compute it identically, so it is defined as an identity function rather than a hash of a hash."
+    },
+    "eip712": {
+      "type": "object",
+      "description": "Binding to the signed projection. See eip712-provisioning-intent.json for the type definition and derivation rules.",
+      "required": [
+        "primaryType",
+        "intentHash"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "primaryType": {
+          "const": "ProvisioningIntent"
+        },
+        "domainName": {
+          "const": "MetaMask ENSv2 Provisioning"
+        },
+        "domainVersion": {
+          "type": "string"
+        },
+        "intentHash": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/hash32",
+          "description": "EIP-712 digest. This is the identity of the intent everywhere else in the program."
+        }
+      }
+    },
+    "signature": {
+      "type": "object",
+      "description": "Absent until authorized. A provider must reject an unsigned or badly signed intent with E_INTENT_SIGNATURE_INVALID.",
+      "required": [
+        "signer",
+        "value"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "signer": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/address"
+        },
+        "value": {
+          "type": "string",
+          "pattern": "^0x[0-9a-fA-F]{130}$"
+        },
+        "signedAt": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/isoTimestamp"
+        }
+      }
+    },
+    "rolesConfigHash": {
+      "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/hash32",
+      "description": "Commitment to the role grants and revocations the flow is authorized to perform. Added because roles_configure is a real step in both step enums and it REGENERATES the token ID, which is the one action that can break identity control, yet the signer previously authorized it nowhere. The all-zero hash means no role changes are authorized."
+    },
+    "rolesConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Expanded role configuration. Must hash to rolesConfigHash.",
+      "properties": {
+        "grants": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "role",
+              "account"
+            ],
+            "properties": {
+              "role": {
+                "type": "string"
+              },
+              "account": {
+                "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/address"
+              }
+            }
+          }
+        },
+        "revocations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "role",
+              "account"
+            ],
+            "properties": {
+              "role": {
+                "type": "string"
+              },
+              "account": {
+                "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/address"
+              }
+            }
+          }
+        },
+        "acknowledgesTokenIdRegeneration": {
+          "type": "boolean",
+          "description": "The signer acknowledges that applying these role changes regenerates the token ID. Under a resource anchor (D-009) identity control survives this; under a token-id anchor it would not."
+        }
+      }
+    }
+  }
+}

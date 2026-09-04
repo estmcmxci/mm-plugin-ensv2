@@ -1,0 +1,17 @@
+{
+  "kind": "transaction",
+  "chain": "eip155:11155111",
+  "deploymentId": "ensv2-sepolia-2026-07-30",
+  "step": "registration_submit",
+  "transactionHash": "0x000000000000000000000000000000000000000000000000000000000000a1a1",
+  "receiptStatus": "success",
+  "blockNumber": 9123456,
+  "from": "0x00000000000000000000000000000000000000a1",
+  "to": "0x00000000000000000000000000000000000000bd",
+  "gasUsed": "284512",
+  "effectiveGasPrice": "1500000000",
+  "submittedAt": "2026-08-25T18:00:00Z",
+  "confirmedAt": "2026-08-25T18:00:24Z",
+  "attempt": 1,
+  "walletJobId": "wjob-9"
+}

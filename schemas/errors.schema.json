@@ -1,0 +1,284 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:mm-ens-identity:schema:errors:1.0.0",
+  "title": "Program error",
+  "description": "Terminal and non-terminal error taxonomy shared by direct execution, provider execution, verification and the integration suite. Every consumer maps its internal failures onto these codes; no consumer invents a local code. The retryability field, not the code, decides what an orchestrator may do next.",
+  "version": "1.0.0",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/noSecrets"
+    },
+    {
+      "if": {
+        "properties": {
+          "retryability": {
+            "const": "indeterminate"
+          }
+        },
+        "required": [
+          "retryability"
+        ]
+      },
+      "then": {
+        "properties": {
+          "recoveryAction": {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "inspect_settlement_before_any_retry",
+                  "inspect_job_status",
+                  "manual_intervention",
+                  "abandon_job"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "$comment": "An indeterminate outcome is resolved by inspection, never by repeating the operation. retry_same_step and every resume kind are structurally unavailable here, so the never-blind-retry rule is enforced rather than merely described."
+    },
+    {
+      "if": {
+        "properties": {
+          "code": {
+            "const": "E_IDENTITY_BINDING_FAILED"
+          },
+          "retryability": {
+            "const": "retryable"
+          }
+        },
+        "required": [
+          "code",
+          "retryability"
+        ]
+      },
+      "then": {
+        "required": [
+          "evidence"
+        ],
+        "properties": {
+          "evidence": {
+            "required": [
+              "revertConfirmed"
+            ],
+            "properties": {
+              "revertConfirmed": {
+                "const": true
+              }
+            }
+          }
+        }
+      },
+      "$comment": "D-010. identity_bind calls register(), which mints a NEW agent, and bindings are immutable with no unbind. Retrying an unconfirmed failure can mint a duplicate agent and strand the first. Retry is therefore permitted only against a confirmed revert, and even then only after identity_preflight re-reads the current token/resource; the job schema enforces the preflight half by forbidding a resume directly into identity_bind."
+    },
+    {
+      "if": {
+        "properties": {
+          "code": {
+            "const": "E_IDENTITY_BINDING_ORPHANED"
+          }
+        },
+        "required": [
+          "code"
+        ]
+      },
+      "then": {
+        "properties": {
+          "retryability": {
+            "enum": [
+              "terminal",
+              "requires_user_action"
+            ]
+          }
+        }
+      },
+      "$comment": "An orphaned binding has no exit through resumption: there is no unbind, so the only recovery is minting a fresh agent. Marking it retryable would loop a consumer forever."
+    }
+  ],
+  "required": [
+    "code",
+    "category",
+    "retryability",
+    "message",
+    "recoveryAction",
+    "occurredAt"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "code": {
+      "description": "Stable machine-readable code. Additive: new codes are a minor version bump, removing or repurposing one is a major bump.",
+      "enum": [
+        "E_DEPLOYMENT_DRIFT",
+        "E_UNSUPPORTED_DEPLOYMENT",
+        "E_UNSUPPORTED_NETWORK",
+        "E_NAME_INVALID",
+        "E_NAME_UNAVAILABLE",
+        "E_DURATION_OUT_OF_BOUNDS",
+        "E_PRICE_EXCEEDS_MAX_SPEND",
+        "E_QUOTE_EXPIRED",
+        "E_INSUFFICIENT_FUNDS",
+        "E_INSUFFICIENT_ALLOWANCE",
+        "E_COMMITMENT_TOO_YOUNG",
+        "E_COMMITMENT_EXPIRED",
+        "E_COMMITMENT_SECRET_UNAVAILABLE",
+        "E_RESOLVER_NOT_PREPARED",
+        "E_TRANSACTION_REVERTED",
+        "E_RECEIPT_STATUS_FAILED",
+        "E_RECEIPT_UNAVAILABLE",
+        "E_RENEWAL_FAILED",
+        "E_VERIFICATION_MISMATCH",
+        "E_RPC_DISAGREEMENT",
+        "E_INTENT_EXPIRED",
+        "E_INTENT_SIGNATURE_INVALID",
+        "E_INTENT_REPLAY",
+        "E_IDEMPOTENCY_CONFLICT",
+        "E_PAYMENT_REQUIRED",
+        "E_PAYMENT_REJECTED",
+        "E_PAYMENT_SETTLEMENT_UNKNOWN",
+        "E_PAYMENT_ALREADY_SETTLED",
+        "E_PROVIDER_UNAVAILABLE",
+        "E_PROVIDER_RESPONSE_UNTRUSTED",
+        "E_PROVIDER_CAPABILITY_UNSUPPORTED",
+        "E_CUSTODY_MODE_UNSUPPORTED",
+        "E_IDENTITY_ADAPTER_UNAVAILABLE",
+        "E_IDENTITY_BINDING_FAILED",
+        "E_IDENTITY_TOKEN_ID_STALE",
+        "E_IDENTITY_METADATA_FAILED",
+        "E_CUSTODY_TRANSFER_INCOMPLETE",
+        "E_IDENTITY_BINDING_ORPHANED",
+        "E_POLICY_DENIED",
+        "E_MFA_REQUIRED",
+        "E_JOB_NOT_FOUND",
+        "E_JOB_TERMINAL",
+        "E_INTERNAL"
+      ]
+    },
+    "category": {
+      "enum": [
+        "validation",
+        "deployment",
+        "funding",
+        "policy",
+        "network",
+        "provider",
+        "payment",
+        "ens",
+        "identity",
+        "internal"
+      ]
+    },
+    "retryability": {
+      "description": "Governs orchestrator behaviour. retryable: the same operation may be repeated automatically. terminal: it may not. requires_user_action: a human decision or authorization is needed. indeterminate: the outcome is UNKNOWN and repeating the operation risks duplicating irreversible or paid work; it must be resolved by inspection, never by an automatic retry.",
+      "enum": [
+        "retryable",
+        "terminal",
+        "requires_user_action",
+        "indeterminate"
+      ]
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000,
+      "description": "Human-readable summary. Must already be redacted: no secrets, keys, credentials or reusable payment authorizations."
+    },
+    "occurredAt": {
+      "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/isoTimestamp"
+    },
+    "step": {
+      "type": "string",
+      "description": "Job step this error is attributed to, when it arose inside a job."
+    },
+    "recoveryAction": {
+      "type": "object",
+      "description": "The exact next action. The brief requires an explicit recovery action, so this is required on every error rather than being left to a caller to infer from the code.",
+      "required": [
+        "kind",
+        "description"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "none",
+            "retry_same_step",
+            "resume_job",
+            "refresh_quote_and_resume",
+            "fund_wallet_and_resume",
+            "grant_allowance_and_resume",
+            "await_commitment_age",
+            "inspect_settlement_before_any_retry",
+            "inspect_job_status",
+            "resume_identity_only",
+            "reregister_identity",
+            "reauthorize_intent",
+            "manual_intervention",
+            "abandon_job"
+          ]
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "resumeFrom": {
+          "type": "string",
+          "description": "Job state or step to resume from, when kind implies a resume."
+        },
+        "notBefore": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/isoTimestamp"
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "description": "Pointers to artifacts that substantiate the error. References only; never inline secret material.",
+      "additionalProperties": false,
+      "properties": {
+        "transactionHashes": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/hash32"
+          }
+        },
+        "settlementId": {
+          "type": "string"
+        },
+        "jobId": {
+          "type": "string"
+        },
+        "intentHash": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/hash32"
+        },
+        "deploymentId": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/deploymentId"
+        },
+        "revertConfirmed": {
+          "type": "boolean",
+          "description": "True ONLY when a transaction receipt was actually read and its status was reverted. It is never inferred from a timeout, an RPC error, or an unread receipt. It is the sole thing that can make an identity binding failure retryable."
+        }
+      }
+    },
+    "details": {
+      "type": "object",
+      "description": "Free-form structured context. Guarded against secret material by the same rule as the envelope.",
+      "allOf": [
+        {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/noSecrets"
+        }
+      ]
+    },
+    "source": {
+      "description": "Which side produced the error. Provider-reported errors are evidence, not truth (D-006).",
+      "enum": [
+        "wallet",
+        "provider",
+        "verifier",
+        "protocol",
+        "unknown"
+      ]
+    }
+  },
+  "$comment": "Invariant: any error whose retryability is indeterminate MUST carry recoveryAction.kind = inspect_settlement_before_any_retry or inspect_job_status. E_PAYMENT_SETTLEMENT_UNKNOWN is the canonical case and encodes the never-blind-repay rule from PROGRAM-CONTEXT section 12."
+}

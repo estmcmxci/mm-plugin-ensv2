@@ -1,0 +1,96 @@
+{
+  "schemaVersion": "1.0.0",
+  "outcome": "verified",
+  "verifiedAt": "2026-08-25T18:10:00Z",
+  "deploymentId": "ensv2-sepolia-2026-07-30",
+  "chain": "eip155:11155111",
+  "name": {
+    "input": "alice.eth",
+    "normalized": "alice.eth",
+    "labelhash": "0x0000000000000000000000000000000000000000000000000000000000000022",
+    "namehash": "0x0000000000000000000000000000000000000000000000000000000000000023"
+  },
+  "canonicality": {
+    "registryMatchesManifest": true,
+    "observedRegistry": "0x00000000000000000000000000000000000000bd",
+    "universalResolver": "0x00000000000000000000000000000000000000ee"
+  },
+  "ens": {
+    "registered": true,
+    "owner": "0x00000000000000000000000000000000000000a1",
+    "expectedOwner": "0x00000000000000000000000000000000000000a1",
+    "ownerMatches": true,
+    "resolver": "0x00000000000000000000000000000000000000de",
+    "forwardAddress": "0x00000000000000000000000000000000000000a1",
+    "forwardResolutionMatches": true,
+    "expiry": 1819236000,
+    "currentTokenId": "7788990011"
+  },
+  "checks": [
+    {
+      "id": "registry-canonical",
+      "description": "UR findCanonicalRegistry matches the manifest",
+      "expected": "0x00000000000000000000000000000000000000bd",
+      "actual": "0x00000000000000000000000000000000000000bd",
+      "passed": true,
+      "severity": "required"
+    },
+    {
+      "id": "owner-matches",
+      "description": "final owner equals the intent owner",
+      "expected": "0x00000000000000000000000000000000000000a1",
+      "actual": "0x00000000000000000000000000000000000000a1",
+      "passed": true,
+      "severity": "required"
+    },
+    {
+      "id": "forward-resolution",
+      "description": "name forward-resolves to the owner through the UR",
+      "expected": "0x00000000000000000000000000000000000000a1",
+      "actual": "0x00000000000000000000000000000000000000a1",
+      "passed": true,
+      "severity": "required"
+    },
+    {
+      "id": "custody-handed-over",
+      "description": "name left provider custody and reached the intended owner",
+      "expected": true,
+      "actual": true,
+      "passed": true,
+      "severity": "required"
+    }
+  ],
+  "evidenceSource": {
+    "rpcEndpointCount": 2,
+    "endpointsAgree": true,
+    "blockNumber": 9123460,
+    "providerAssertionsUsed": false
+  },
+  "custody": {
+    "mode": "provider-custody-transfer-last",
+    "transferRequired": true,
+    "transferCompleted": true,
+    "interimHolder": "0x000000000000000000000000000000000000009e",
+    "finalOwnerIsIntendedOwner": true
+  },
+  "identity": {
+    "requested": "erc8004",
+    "bound": true,
+    "agentId": "8416",
+    "adapterProxy": "0x00000000000000000000000000000000000000ad",
+    "adapterImplementation": "0x000000000000000000000000000000000000001b",
+    "bindingStandard": "erc1155",
+    "bindingStandardId": 1,
+    "bindingMetadataAddress": "0x00000000000000000000000000000000000000ad",
+    "bindingMetadataMatches": true,
+    "ownerCheckMethod": "ownerOf-getTokenId",
+    "controlVerified": true,
+    "anchor": {
+      "kind": "resource",
+      "value": "115792089237316195423570985008687907853269984665640564039457584007913129639731",
+      "invariantUnderTokenIdChange": true,
+      "survivesReregistration": false,
+      "epochEqualityChecked": true
+    }
+  }
+}

@@ -1,0 +1,90 @@
+{
+  "schemaVersion": "1.0.0",
+  "jobId": "job-79",
+  "origin": "provider",
+  "state": "ens_registered",
+  "intentHash": "0x0000000000000000000000000000000000000000000000000000000000000011",
+  "deploymentId": "ensv2-sepolia-2026-07-30",
+  "chain": "eip155:11155111",
+  "payment": "x402",
+  "identity": "erc8004",
+  "custodyMode": "sponsored-to-owner",
+  "createdAt": "2026-08-25T18:00:00Z",
+  "updatedAt": "2026-08-25T18:12:00Z",
+  "facts": {
+    "normalizedName": "alice.eth",
+    "labelhash": "0x0000000000000000000000000000000000000000000000000000000000000022",
+    "owner": "0x00000000000000000000000000000000000000a1",
+    "durationSeconds": 31536000,
+    "commitmentSecretRef": "ref:keystore:job-1:commitment",
+    "commitmentHash": "0x00000000000000000000000000000000000000000000000000000000000000cc",
+    "resolverAddress": "0x00000000000000000000000000000000000000de",
+    "attemptCounters": {
+      "registration_submit": 1
+    },
+    "identityAnchor": {
+      "kind": "resource",
+      "value": "115792089237316195423570985008687907853269984665640564039457584007913129639731",
+      "observedAt": "2026-08-25T18:11:30Z"
+    }
+  },
+  "steps": [
+    {
+      "step": "payment_settle",
+      "state": "succeeded",
+      "attempts": 1,
+      "receipts": [
+        {
+          "kind": "settlement",
+          "settlementId": "stl-0001",
+          "x402Version": "2",
+          "scheme": "exact",
+          "asset": "0x00000000000000000000000000000000000000c0",
+          "network": "eip155:11155111",
+          "amount": "250000",
+          "payer": "0x00000000000000000000000000000000000000a1",
+          "payee": "0x00000000000000000000000000000000000000f0",
+          "status": "settled",
+          "settledAt": "2026-08-25T18:01:00Z",
+          "idempotencyKey": "0x0000000000000000000000000000000000000000000000000000000000000011",
+          "providerJobId": "job-77",
+          "intentHash": "0x0000000000000000000000000000000000000000000000000000000000000011"
+        }
+      ]
+    },
+    {
+      "step": "registration_submit",
+      "state": "succeeded",
+      "attempts": 1
+    },
+    {
+      "step": "ens_verify",
+      "state": "succeeded",
+      "attempts": 1
+    },
+    {
+      "step": "identity_preflight",
+      "state": "pending",
+      "attempts": 0
+    }
+  ],
+  "outcome": {
+    "ens": "succeeded",
+    "identity": "pending",
+    "payment": "settled"
+  },
+  "idempotencyKey": "0x0000000000000000000000000000000000000000000000000000000000000011",
+  "resume": {
+    "resumable": true,
+    "resumeFromStep": "identity_preflight",
+    "nextAction": "Re-read the current resource and re-check epoch equality against the recorded anchor, then bind.",
+    "requiresPayment": false
+  },
+  "provider": {
+    "providerId": "0x0000000000000000000000000000000000000000000000000000000000000055",
+    "url": "https://registrar.example.invalid",
+    "jobId": "job-77",
+    "reportedState": "completed",
+    "lastPolledAt": "2026-08-25T18:12:30Z"
+  }
+}

@@ -1,0 +1,91 @@
+{
+  "schemaVersion": "1.0.0",
+  "outcome": "failed",
+  "verifiedAt": "2026-08-25T18:10:00Z",
+  "deploymentId": "ensv2-sepolia-2026-07-30",
+  "chain": "eip155:11155111",
+  "name": {
+    "input": "alice.eth",
+    "normalized": "alice.eth",
+    "labelhash": "0x0000000000000000000000000000000000000000000000000000000000000022",
+    "namehash": "0x0000000000000000000000000000000000000000000000000000000000000023"
+  },
+  "canonicality": {
+    "registryMatchesManifest": true,
+    "observedRegistry": "0x00000000000000000000000000000000000000bd",
+    "universalResolver": "0x00000000000000000000000000000000000000ee"
+  },
+  "ens": {
+    "registered": true,
+    "owner": "0x00000000000000000000000000000000000000a1",
+    "expectedOwner": "0x00000000000000000000000000000000000000a1",
+    "ownerMatches": true,
+    "resolver": "0x00000000000000000000000000000000000000de",
+    "forwardAddress": "0x00000000000000000000000000000000000000a1",
+    "forwardResolutionMatches": true,
+    "expiry": 1819236000,
+    "currentTokenId": "7788990011"
+  },
+  "checks": [
+    {
+      "id": "registry-canonical",
+      "description": "UR findCanonicalRegistry matches the manifest",
+      "expected": "0x00000000000000000000000000000000000000bd",
+      "actual": "0x00000000000000000000000000000000000000bd",
+      "passed": true,
+      "severity": "required"
+    },
+    {
+      "id": "owner-matches",
+      "description": "final owner equals the intent owner",
+      "expected": "0x00000000000000000000000000000000000000a1",
+      "actual": "0x00000000000000000000000000000000000000a1",
+      "passed": true,
+      "severity": "required"
+    },
+    {
+      "id": "forward-resolution",
+      "description": "name forward-resolves to the owner through the UR",
+      "expected": "0x00000000000000000000000000000000000000a1",
+      "actual": "0x00000000000000000000000000000000000000a1",
+      "passed": true,
+      "severity": "required"
+    },
+    {
+      "id": "bound-token-is-current",
+      "description": "bound token ID still equals the current token ID",
+      "expected": "7788990011",
+      "actual": "111",
+      "passed": false,
+      "severity": "required"
+    }
+  ],
+  "evidenceSource": {
+    "rpcEndpointCount": 2,
+    "endpointsAgree": true,
+    "blockNumber": 9123460,
+    "providerAssertionsUsed": false
+  },
+  "identity": {
+    "requested": "erc8004",
+    "bound": true,
+    "agentId": "8416",
+    "adapterProxy": "0x00000000000000000000000000000000000000ad",
+    "adapterImplementation": "0x000000000000000000000000000000000000001b",
+    "boundTokenId": "111",
+    "boundTokenIdIsCurrent": false,
+    "controlVerified": false,
+    "bindingStandard": "erc1155",
+    "bindingStandardId": 1,
+    "bindingMetadataAddress": "0x00000000000000000000000000000000000000ad",
+    "bindingMetadataMatches": true,
+    "ownerCheckMethod": "getOwner",
+    "anchor": {
+      "kind": "token-id",
+      "value": "111",
+      "invariantUnderTokenIdChange": false,
+      "survivesReregistration": false,
+      "epochEqualityChecked": false
+    }
+  }
+}

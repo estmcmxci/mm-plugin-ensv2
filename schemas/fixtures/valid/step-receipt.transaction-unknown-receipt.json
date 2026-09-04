@@ -1,0 +1,11 @@
+{
+  "kind": "transaction",
+  "chain": "eip155:11155111",
+  "deploymentId": "ensv2-sepolia-2026-07-30",
+  "step": "commitment_submit",
+  "transactionHash": "0x000000000000000000000000000000000000000000000000000000000000b2b2",
+  "receiptStatus": "unknown",
+  "submittedAt": "2026-08-25T18:00:00Z",
+  "attempt": 1,
+  "walletJobId": "wjob-10"
+}

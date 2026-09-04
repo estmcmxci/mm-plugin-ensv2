@@ -1,0 +1,13 @@
+{
+  "kind": "signature",
+  "signatureKind": "provisioning-intent",
+  "walletJobId": "wjob-101",
+  "status": "approved",
+  "mfaRequired": false,
+  "policyDecision": "allowed",
+  "requestedAt": "2026-08-25T18:00:00Z",
+  "resolvedAt": "2026-08-25T18:00:12Z",
+  "signerAddress": "0x00000000000000000000000000000000000000a1",
+  "intentHash": "0x0000000000000000000000000000000000000000000000000000000000000011",
+  "step": "intent_sign"
+}

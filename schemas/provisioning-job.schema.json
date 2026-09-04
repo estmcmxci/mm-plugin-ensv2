@@ -1,0 +1,686 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:mm-ens-identity:schema:provisioning-job:1.0.0",
+  "title": "Provisioning job",
+  "description": "Durable state of one provisioning run. The same shape is used by a local CLI job and a provider-side job, so restart, resume and partial success behave identically on both sides. Resume decisions are driven by the recorded FACTS, not by the state label alone.",
+  "version": "1.0.0",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/noSecrets"
+    },
+    {
+      "if": {
+        "properties": {
+          "state": {
+            "const": "completed"
+          }
+        },
+        "required": [
+          "state"
+        ]
+      },
+      "then": {
+        "required": [
+          "result"
+        ],
+        "$comment": "A completed job must carry its common final result."
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "origin": {
+            "const": "provider"
+          }
+        },
+        "required": [
+          "origin"
+        ]
+      },
+      "then": {
+        "required": [
+          "idempotencyKey"
+        ],
+        "$comment": "A provider job without an idempotency key cannot be deduplicated against a settlement."
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "payment": {
+            "const": "direct"
+          }
+        },
+        "required": [
+          "payment"
+        ]
+      },
+      "then": {
+        "properties": {
+          "custodyMode": {
+            "const": "direct"
+          }
+        },
+        "not": {
+          "required": [
+            "provider"
+          ]
+        }
+      },
+      "$comment": "Mirrors the intent's cross-field discipline. A direct job previously accepted a provider block and a custodial mode, which would have described an execution that cannot happen."
+    },
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "properties": {
+              "payment": {
+                "const": "unknown"
+              }
+            },
+            "required": [
+              "payment"
+            ]
+          }
+        },
+        "required": [
+          "outcome"
+        ]
+      },
+      "then": {
+        "properties": {
+          "resume": {
+            "properties": {
+              "requiresPayment": {
+                "const": false
+              }
+            },
+            "required": [
+              "requiresPayment"
+            ]
+          }
+        }
+      },
+      "$comment": "An unknown settlement can never schedule another payment. This was asserted in prose; ajv ignores $comment, so it is now a constraint."
+    },
+    {
+      "if": {
+        "properties": {
+          "steps": {
+            "contains": {
+              "properties": {
+                "step": {
+                  "const": "identity_bind"
+                }
+              },
+              "required": [
+                "step"
+              ]
+            }
+          }
+        },
+        "required": [
+          "steps"
+        ]
+      },
+      "then": {
+        "properties": {
+          "facts": {
+            "required": [
+              "identityAnchor"
+            ]
+          }
+        }
+      },
+      "$comment": "A job that has reached identity_bind must already have recorded its anchor, or its mandatory preflight cannot be performed on resume."
+    },
+    {
+      "if": {
+        "properties": {
+          "steps": {
+            "contains": {
+              "properties": {
+                "receipts": {
+                  "contains": {
+                    "properties": {
+                      "kind": {
+                        "const": "settlement"
+                      },
+                      "status": {
+                        "const": "unknown"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "status"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "receipts"
+              ]
+            }
+          }
+        },
+        "required": [
+          "steps"
+        ]
+      },
+      "then": {
+        "required": [
+          "resume"
+        ],
+        "properties": {
+          "resume": {
+            "required": [
+              "requiresPayment"
+            ],
+            "properties": {
+              "requiresPayment": {
+                "const": false
+              }
+            }
+          }
+        }
+      },
+      "$comment": "The never-blind-repay guard is bound to the recorded EVIDENCE, not to an optional summary field. Keying it on outcome.payment left two bypasses: omit outcome entirely, or set it to pending, while still carrying a settlement receipt with status unknown. Both now fail. resume is required here too, so dropping it cannot evade the rule either."
+    },
+    {
+      "if": {
+        "properties": {
+          "identity": {
+            "const": "erc8004"
+          }
+        },
+        "required": [
+          "identity"
+        ],
+        "anyOf": [
+          {
+            "properties": {
+              "state": {
+                "enum": [
+                  "ens_registered",
+                  "identity_pending",
+                  "identity_bound",
+                  "completed"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "properties": {
+              "steps": {
+                "contains": {
+                  "properties": {
+                    "step": {
+                      "const": "registration_submit"
+                    },
+                    "state": {
+                      "const": "succeeded"
+                    }
+                  },
+                  "required": [
+                    "step",
+                    "state"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "steps"
+            ]
+          }
+        ]
+      },
+      "then": {
+        "properties": {
+          "facts": {
+            "required": [
+              "identityAnchor"
+            ]
+          }
+        }
+      },
+      "$comment": "The anchor becomes observable the moment registration succeeds, and identity_preflight runs BEFORE identity_bind. Keying the requirement on the presence of an identity_bind step therefore left a window: a job in the ENS-complete/identity-pending state could carry no anchor, and a resume into preflight would re-derive from labelhash, obtain the CURRENT epoch, and compare current == current. That is the D-009 capture failure in a narrower window, and it is a required acceptance scenario in PROGRAM-CONTEXT section 11. The requirement now attaches at registration, which is when the value first exists."
+    }
+  ],
+  "required": [
+    "schemaVersion",
+    "jobId",
+    "origin",
+    "state",
+    "intentHash",
+    "deploymentId",
+    "chain",
+    "payment",
+    "identity",
+    "custodyMode",
+    "facts",
+    "steps",
+    "createdAt",
+    "updatedAt"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0.0"
+    },
+    "jobId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "origin": {
+      "enum": [
+        "local",
+        "provider"
+      ],
+      "description": "Which side owns this record. A local job for an x402 run mirrors the provider job but is not authoritative for provider-side steps."
+    },
+    "state": {
+      "description": "Minimum state set from DELIVERY-PLAN section 6. payment_pending and direct_funding_ready are the mode-specific branch; everything after accepted is shared.",
+      "enum": [
+        "draft",
+        "quoted",
+        "awaiting_authorization",
+        "payment_pending",
+        "direct_funding_ready",
+        "accepted",
+        "resolver_prepared",
+        "commitment_submitted",
+        "commitment_confirmed",
+        "commitment_maturing",
+        "registration_submitted",
+        "ens_registered",
+        "identity_pending",
+        "identity_bound",
+        "completed",
+        "retryable_failed",
+        "terminal_failed",
+        "expired",
+        "cancelled"
+      ]
+    },
+    "intentHash": {
+      "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/hash32"
+    },
+    "idempotencyKey": {
+      "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/hash32",
+      "description": "Exactly the intentHash, verbatim. Same definition on both sides of the wire."
+    },
+    "deploymentId": {
+      "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/deploymentId"
+    },
+    "chain": {
+      "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/caip2"
+    },
+    "payment": {
+      "enum": [
+        "direct",
+        "x402"
+      ]
+    },
+    "identity": {
+      "enum": [
+        "none",
+        "erc8004"
+      ]
+    },
+    "custodyMode": {
+      "enum": [
+        "direct",
+        "sponsored-to-owner",
+        "provider-custody-transfer-last"
+      ]
+    },
+    "createdAt": {
+      "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/isoTimestamp"
+    },
+    "updatedAt": {
+      "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/isoTimestamp"
+    },
+    "expiresAt": {
+      "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/isoTimestamp"
+    },
+    "facts": {
+      "type": "object",
+      "description": "Everything resume depends on. A job that cannot answer these cannot be resumed safely and must be inspected rather than retried.",
+      "required": [
+        "normalizedName",
+        "owner"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "normalizedName": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/ensName"
+        },
+        "labelhash": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/hash32"
+        },
+        "owner": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/address"
+        },
+        "durationSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "commitmentSecretRef": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/secretRef",
+          "description": "Handle only. Losing the secret makes the commitment unusable and forces waiting out the window; it does not make it safe to re-commit blindly under a different secret while the first is still live."
+        },
+        "commitmentHash": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/hash32"
+        },
+        "commitmentSubmittedAt": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/isoTimestamp"
+        },
+        "commitmentMatureAt": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/isoTimestamp"
+        },
+        "commitmentExpiresAt": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/isoTimestamp"
+        },
+        "resolverAddress": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/address",
+          "description": "The exact resolver committed to. A resume must reuse this value, not re-predict it."
+        },
+        "settlementId": {
+          "type": "string"
+        },
+        "providerJobId": {
+          "type": "string"
+        },
+        "currentTokenId": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/uint256String",
+          "description": "Re-read immediately before identity binding, never carried forward from an earlier step, because it is mutable."
+        },
+        "erc8004AgentId": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/uint256String"
+        },
+        "quoteId": {
+          "type": "string"
+        },
+        "attemptCounters": {
+          "type": "object",
+          "description": "Per-step attempt counts. A budget exists so a retryable failure cannot loop indefinitely.",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "executionPlane": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "ref"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "description": "Which execution plane holds the handle, for example metamask-agent-wallet."
+            },
+            "ref": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "description": "Opaque handle. Meaningful only to that plane; never parsed by another consumer."
+            }
+          },
+          "description": "Opaque reference into a consumer's own execution plane, so a CLI can recover a pending wallet job after a restart without keeping a private sidecar keyed by jobId. Opaque by design: it is a handle, not a place to widen the contract."
+        },
+        "identityAnchor": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "value",
+            "observedAt"
+          ],
+          "properties": {
+            "kind": {
+              "enum": [
+                "resource",
+                "token-id"
+              ]
+            },
+            "value": {
+              "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/resource"
+            },
+            "observedAt": {
+              "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/isoTimestamp"
+            }
+          },
+          "description": "The identity anchor as observed when registration first established it. Durable, because D-010 makes identity_preflight mandatory and preflight's job is epoch equality against the anchor observed at registration time. Without a stored value a resumed job can only re-derive from labelhash, which yields the CURRENT epoch, so the check degenerates to current == current and passes precisely in the case it exists to catch: the name expired mid-job and a stranger re-registered it. facts.currentTokenId is not a substitute, since under D-009 the token ID is EXPECTED to change."
+        }
+      }
+    },
+    "steps": {
+      "type": "array",
+      "description": "Ordered execution record. Each entry is independently resumable and carries its own receipts and error.",
+      "items": {
+        "type": "object",
+        "required": [
+          "step",
+          "state"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "step": {
+            "enum": [
+              "canonicality_check",
+              "name_validate",
+              "quote",
+              "intent_sign",
+              "payment_authorize",
+              "funding_preflight",
+              "resolver_deploy",
+              "resolver_initialize",
+              "payment_settle",
+              "payment_token_approve",
+              "commitment_submit",
+              "commitment_wait",
+              "price_recheck",
+              "registration_submit",
+              "renewal_submit",
+              "records_configure",
+              "roles_configure",
+              "ens_verify",
+              "identity_preflight",
+              "identity_bind",
+              "identity_metadata_publish",
+              "identity_verify",
+              "ownership_transfer",
+              "reverse_record_set"
+            ]
+          },
+          "state": {
+            "enum": [
+              "pending",
+              "in_progress",
+              "succeeded",
+              "failed",
+              "skipped"
+            ]
+          },
+          "attempts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "startedAt": {
+            "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/isoTimestamp"
+          },
+          "completedAt": {
+            "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/isoTimestamp"
+          },
+          "receipts": {
+            "type": "array",
+            "items": {
+              "$ref": "urn:mm-ens-identity:schema:step-receipt:1.0.0"
+            }
+          },
+          "error": {
+            "$ref": "urn:mm-ens-identity:schema:errors:1.0.0"
+          }
+        }
+      }
+    },
+    "outcome": {
+      "type": "object",
+      "description": "ENS completion and identity completion are tracked separately. ens=succeeded with identity=failed is a SUCCESSFUL ENS result with an incomplete identity extension, and resume begins at identity preflight without re-registering or repaying.",
+      "additionalProperties": false,
+      "properties": {
+        "ens": {
+          "enum": [
+            "pending",
+            "succeeded",
+            "failed"
+          ]
+        },
+        "identity": {
+          "enum": [
+            "not_requested",
+            "pending",
+            "succeeded",
+            "failed"
+          ]
+        },
+        "payment": {
+          "enum": [
+            "not_required",
+            "pending",
+            "settled",
+            "unknown",
+            "rejected"
+          ]
+        }
+      }
+    },
+    "resume": {
+      "type": "object",
+      "description": "How to continue. Computed from facts, not stored as a guess.",
+      "required": [
+        "resumable"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "resumable": {
+          "type": "boolean"
+        },
+        "resumeFromStep": {
+          "enum": [
+            "canonicality_check",
+            "name_validate",
+            "quote",
+            "intent_sign",
+            "payment_authorize",
+            "funding_preflight",
+            "resolver_deploy",
+            "resolver_initialize",
+            "payment_settle",
+            "payment_token_approve",
+            "commitment_submit",
+            "commitment_wait",
+            "price_recheck",
+            "registration_submit",
+            "renewal_submit",
+            "records_configure",
+            "roles_configure",
+            "ens_verify",
+            "identity_preflight",
+            "identity_metadata_publish",
+            "identity_verify",
+            "ownership_transfer",
+            "reverse_record_set"
+          ],
+          "description": "Closed enum: every step except identity_bind. Previously a free-form string with an exact-match not-constraint, so a typo such as identity_bnd slipped past the D-010 guard. An unknown step name is now rejected outright rather than silently permitted."
+        },
+        "nextAction": {
+          "type": "string"
+        },
+        "blockedBy": {
+          "$ref": "urn:mm-ens-identity:schema:errors:1.0.0"
+        },
+        "notBefore": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/isoTimestamp",
+          "description": "Set while a commitment is maturing. Resuming earlier fails with E_COMMITMENT_TOO_YOUNG."
+        },
+        "requiresPayment": {
+          "type": "boolean",
+          "description": "Must be false whenever a settlement exists in an unknown state. A paid retry is never automatic when completion is unknown."
+        }
+      }
+    },
+    "result": {
+      "type": "object",
+      "description": "The common final result. Deliberately provider-neutral: an integration test must not be able to tell direct from x402 execution by inspecting this object's shape. Provider-specific data stays in the provider block below and never leaks in here.",
+      "required": [
+        "verification"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "verification": {
+          "$ref": "urn:mm-ens-identity:schema:verification-result:1.0.0"
+        },
+        "name": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/ensName"
+        },
+        "owner": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/address"
+        },
+        "transactionHashes": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/hash32"
+          }
+        },
+        "settlementIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 1,
+          "$comment": "At most one accepted settlement per job. The bound is structural, so a double-charge shows up as a schema violation rather than a subtle data anomaly."
+        }
+      }
+    },
+    "provider": {
+      "type": "object",
+      "description": "Provider-side context. Present only for x402 jobs. Never merged into result.",
+      "additionalProperties": false,
+      "properties": {
+        "providerId": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/hash32"
+        },
+        "url": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/httpsUrl"
+        },
+        "jobId": {
+          "type": "string"
+        },
+        "statusUrl": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/httpsUrl"
+        },
+        "lastPolledAt": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/isoTimestamp"
+        },
+        "reportedState": {
+          "type": "string",
+          "description": "What the provider claims. Evidence, not truth (D-006). It never sets the job state on its own; the verifier does."
+        }
+      }
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "$ref": "urn:mm-ens-identity:schema:errors:1.0.0"
+      }
+    }
+  }
+}

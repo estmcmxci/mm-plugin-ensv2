@@ -1,0 +1,394 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:mm-ens-identity:schema:deployment-manifest:1.0.0",
+  "title": "Deployment manifest",
+  "description": "Pinned identity of one protocol deployment: its chain, contracts, ABI bundle, payment asset, timing bounds and canonicality invariant. Every plan, job, receipt and verification result carries the deploymentId defined here. WS01 owns the CONTENT of a manifest and must generate it from pinned deployment artifacts; this schema owns only its SHAPE. Addresses are never hand-copied from narrative documentation.",
+  "version": "1.0.0",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/noSecrets"
+    }
+  ],
+  "required": [
+    "schemaVersion",
+    "deploymentId",
+    "chain",
+    "networkClass",
+    "protocol",
+    "status",
+    "artifactSource",
+    "abiBundle",
+    "canonicality",
+    "contracts",
+    "registrationPaymentAsset",
+    "commitment",
+    "tokenModel",
+    "durationBounds",
+    "verification"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0.0"
+    },
+    "deploymentId": {
+      "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/deploymentId"
+    },
+    "chain": {
+      "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/caip2"
+    },
+    "networkClass": {
+      "enum": [
+        "testnet",
+        "mainnet"
+      ],
+      "description": "Explicit. A mainnet manifest must have status disabled until a canonical production ENSv2 deployment exists (D-003)."
+    },
+    "protocol": {
+      "enum": [
+        "ensv2",
+        "ensv1"
+      ],
+      "description": "ENSv1 exists here only so it can be selected as a separate explicit backend. It is never a silent fallback from ENSv2; detection fails closed."
+    },
+    "status": {
+      "enum": [
+        "enabled",
+        "disabled"
+      ],
+      "description": "Feature gate. A disabled manifest must be rejected before any wallet request is constructed."
+    },
+    "artifactSource": {
+      "type": "object",
+      "description": "Where the addresses and ABIs were imported from. Pinned so a manifest can be regenerated and diffed rather than trusted.",
+      "required": [
+        "kind",
+        "reference"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "git-repository",
+            "npm-package",
+            "deployment-broadcast"
+          ]
+        },
+        "reference": {
+          "type": "string",
+          "description": "Repository URL or package name."
+        },
+        "commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{7,40}$"
+        },
+        "packageVersion": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "importedAt": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/isoTimestamp"
+        }
+      }
+    },
+    "abiBundle": {
+      "type": "object",
+      "description": "ABI set bound to this deployment. An unknown or mismatched bundle is refused rather than coerced (gap E2).",
+      "required": [
+        "version",
+        "integrity"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "type": "string"
+        },
+        "integrity": {
+          "type": "string",
+          "pattern": "^sha256-[A-Za-z0-9+/]{43}=$",
+          "description": "Subresource-integrity style digest over the serialized ABI bundle."
+        },
+        "location": {
+          "type": "string",
+          "description": "Path or package specifier the bundle is imported from."
+        }
+      }
+    },
+    "canonicality": {
+      "type": "object",
+      "description": "The fail-closed invariant (gap E1). Re-evaluated when a plan is built AND again immediately before any irreversible step, including on every resume.",
+      "required": [
+        "universalResolver",
+        "check",
+        "failClosed"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "universalResolver": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/address"
+        },
+        "check": {
+          "type": "object",
+          "required": [
+            "method",
+            "argument",
+            "expectedRegistry"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "method": {
+              "const": "findCanonicalRegistry"
+            },
+            "argument": {
+              "type": "string",
+              "pattern": "^0x[0-9a-f]*$",
+              "description": "The argument passed to findCanonicalRegistry, as DNS-wire-encoded bytes, NOT a human label. For eth this is 0x0365746800. Stored pre-encoded so a consumer cannot disagree with the encoder about how a label becomes calldata."
+            },
+            "expectedRegistry": {
+              "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/address"
+            },
+            "argumentLabel": {
+              "type": "string",
+              "description": "Human-readable label the argument encodes, for display and review only. Never used to build calldata."
+            }
+          }
+        },
+        "failClosed": {
+          "const": true,
+          "description": "Not configurable. If the live result differs from expectedRegistry, execution aborts with E_DEPLOYMENT_DRIFT. There is no permissive mode and no fallback to ENSv1."
+        }
+      }
+    },
+    "contracts": {
+      "type": "object",
+      "description": "Role to contract mapping. The required roles below are the minimum a registration flow needs; additional roles may be added additively.",
+      "required": [
+        "ethRegistry",
+        "ethRegistrar",
+        "universalResolver"
+      ],
+      "propertyNames": {
+        "pattern": "^[a-zA-Z][a-zA-Z0-9]{1,63}$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "address"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "address": {
+            "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/address"
+          },
+          "abiRef": {
+            "type": "string",
+            "description": "Key into abiBundle. Never an inline ABI."
+          },
+          "deployedAtBlock": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "notes": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "registrationPaymentAsset": {
+      "type": "object",
+      "description": "ERC-20 the registrar charges in. Registration therefore needs both this asset and native gas (gap E4).",
+      "required": [
+        "address",
+        "symbol",
+        "decimals"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "address": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/address"
+        },
+        "symbol": {
+          "type": "string"
+        },
+        "decimals": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 36
+        },
+        "testFaucet": {
+          "type": "string",
+          "description": "Optional test-token mint helper, testnet only."
+        }
+      }
+    },
+    "commitment": {
+      "type": "object",
+      "description": "Commit/reveal timing window enforced by the deployed registrar.",
+      "required": [
+        "minAgeSeconds",
+        "maxAgeSeconds"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "minAgeSeconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxAgeSeconds": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "tokenModel": {
+      "type": "object",
+      "description": "Canonical token semantics. ENSv2 uses an ERC-1155 singleton and its token IDs are MUTABLE: role grants and revocations can regenerate a token ID. This is the fact behind P-005 and gap I2/I4, so it is pinned in the manifest rather than assumed by each consumer.",
+      "required": [
+        "standard",
+        "tokenIdMutable"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "standard": {
+          "enum": [
+            "erc1155-singleton",
+            "erc721",
+            "erc1155"
+          ]
+        },
+        "tokenIdMutable": {
+          "type": "boolean"
+        },
+        "stableIdentityKey": {
+          "enum": [
+            "resource",
+            "labelhash",
+            "namehash",
+            "none"
+          ],
+          "description": "How a name is identified independently of its current token ID. Gate: P-005. Use resource. labelhash is listed because the registry accepts it as an anyId, but it is UNSAFE as an identity anchor: _entry() zeroes the version bits, so a labelhash anchor survives expiry and silently follows whoever re-registers the name, inheriting the previous holder's ERC-8004 identity. resource carries the EAC version counter in its low 32 bits, so it is invariant under token-ID regeneration and correctly dies on expiry, unregister and re-registration. See D-009."
+        }
+      }
+    },
+    "durationBounds": {
+      "type": "object",
+      "required": [
+        "minSeconds",
+        "maxSeconds"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "minSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxSeconds": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "adapter8004": {
+      "type": "object",
+      "description": "Optional. Present only when identity binding is available on this deployment. The SOURCE version and the LIVE proxy implementation are separate facts and both are recorded, because a source release is not live until the Safe-owned UUPS proxy is upgraded (gap I3).",
+      "required": [
+        "proxy",
+        "liveImplementation",
+        "supportedTokenStandards",
+        "supportsBindExisting"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "proxy": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/address"
+        },
+        "liveImplementation": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/address"
+        },
+        "liveImplementationVerifiedAt": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/isoTimestamp"
+        },
+        "sourceVersion": {
+          "type": "string"
+        },
+        "sourceReleased": {
+          "type": "boolean",
+          "description": "False when the source version is unreleased upstream."
+        },
+        "erc8004Registry": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/address"
+        },
+        "supportedTokenStandards": {
+          "type": "array",
+          "uniqueItems": true,
+          "minItems": 1,
+          "items": {
+            "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/bindingStandard"
+          },
+          "description": "Binding standards the LIVE implementation supports, verified against deployed bytecode rather than the source release. Pinned here so every consumer does not re-derive it by probing."
+        },
+        "supportsBindExisting": {
+          "type": "boolean",
+          "description": "Whether bindExisting is present in the deployed bytecode. Source presence is not deployment presence."
+        },
+        "registryHelpers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "getOwner": {
+              "type": "boolean",
+              "description": "getOwner(uint256) is absent on older registries. When false, use ownerOf(getTokenId(anyId)), which is equivalent and present everywhere, so this is a capability flag rather than a hard gate."
+            },
+            "getTokenId": {
+              "type": "boolean"
+            },
+            "getResource": {
+              "type": "boolean"
+            }
+          },
+          "description": "Which registry helper accessors exist on this deployment."
+        },
+        "implementationSourceCommit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{7,40}$",
+          "description": "Source commit whose compiled output matches the live implementation's runtime bytecode. Matching bytecode to a commit is the only honest way to know what is deployed; a version string is a claim."
+        },
+        "upgradeAuthority": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/address",
+          "description": "Account that can upgrade the UUPS proxy. Recorded because it is the reason binding semantics can change between signing and execution."
+        }
+      }
+    },
+    "verification": {
+      "type": "object",
+      "description": "Provenance of this manifest.",
+      "required": [
+        "verifiedAt",
+        "method"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "verifiedAt": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/isoTimestamp"
+        },
+        "method": {
+          "enum": [
+            "live-probe",
+            "artifact-import",
+            "both"
+          ]
+        },
+        "rpcEndpointsConsulted": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

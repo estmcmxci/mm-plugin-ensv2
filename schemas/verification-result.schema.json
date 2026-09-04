@@ -1,0 +1,577 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:mm-ens-identity:schema:verification-result:1.0.0",
+  "title": "Verification result",
+  "description": "Output of the independent onchain verifier. D-006: direct and x402 execution pass the SAME verifier and produce this same shape. It is computed only from chain reads; nothing a provider asserts may appear as an input. A provider success response that this verifier contradicts yields E_PROVIDER_RESPONSE_UNTRUSTED.",
+  "version": "1.0.0",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/noSecrets"
+    },
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "verified"
+          }
+        },
+        "required": [
+          "outcome"
+        ]
+      },
+      "then": {
+        "properties": {
+          "canonicality": {
+            "properties": {
+              "registryMatchesManifest": {
+                "const": true
+              }
+            },
+            "required": [
+              "registryMatchesManifest"
+            ]
+          },
+          "evidenceSource": {
+            "properties": {
+              "endpointsAgree": {
+                "const": true
+              },
+              "rpcEndpointCount": {
+                "minimum": 2
+              }
+            },
+            "required": [
+              "endpointsAgree",
+              "rpcEndpointCount"
+            ]
+          }
+        }
+      },
+      "$comment": "A verified outcome cannot coexist with a drifted registry or with single-sourced/disagreeing RPC evidence. Previously these were prose; ajv ignores $comment, so they are now real constraints."
+    },
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "verified"
+          },
+          "custody": {
+            "properties": {
+              "transferRequired": {
+                "const": true
+              }
+            },
+            "required": [
+              "transferRequired"
+            ]
+          }
+        },
+        "required": [
+          "outcome",
+          "custody"
+        ]
+      },
+      "then": {
+        "properties": {
+          "custody": {
+            "properties": {
+              "transferCompleted": {
+                "const": true
+              },
+              "finalOwnerIsIntendedOwner": {
+                "const": true
+              }
+            },
+            "required": [
+              "transferCompleted",
+              "finalOwnerIsIntendedOwner"
+            ]
+          }
+        }
+      },
+      "$comment": "A custodial job cannot be verified until custody has actually been handed over."
+    },
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "verified"
+          }
+        },
+        "required": [
+          "outcome"
+        ]
+      },
+      "then": {
+        "required": [
+          "custody"
+        ]
+      },
+      "$comment": "Custody evidence is REQUIRED for any verified outcome, not merely constrained when present. Previously the custody guard only fired if custody already existed, so deleting the key let a provider-custody-transfer-last job report verified while never proving the name left provider custody. For direct and sponsored-to-owner this is trivial to populate: mode, transferRequired false, transferCompleted true."
+    }
+  ],
+  "required": [
+    "schemaVersion",
+    "outcome",
+    "verifiedAt",
+    "deploymentId",
+    "chain",
+    "name",
+    "canonicality",
+    "ens",
+    "checks",
+    "evidenceSource"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0.0"
+    },
+    "outcome": {
+      "enum": [
+        "verified",
+        "partial",
+        "failed"
+      ],
+      "description": "partial means the ENS postconditions hold and a requested identity postcondition does not. It is a real outcome, not a failure: ENS completion and identity completion are separated so recovery never repeats paid or irreversible work."
+    },
+    "verifiedAt": {
+      "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/isoTimestamp"
+    },
+    "deploymentId": {
+      "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/deploymentId"
+    },
+    "chain": {
+      "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/caip2"
+    },
+    "name": {
+      "type": "object",
+      "required": [
+        "normalized"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/ensName"
+        },
+        "normalized": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/ensName"
+        },
+        "labelhash": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/hash32"
+        },
+        "namehash": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/hash32"
+        }
+      }
+    },
+    "canonicality": {
+      "type": "object",
+      "description": "Re-checked at verification time, not inherited from the plan. A drifted registry invalidates the whole result.",
+      "required": [
+        "registryMatchesManifest",
+        "observedRegistry"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "registryMatchesManifest": {
+          "type": "boolean"
+        },
+        "observedRegistry": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/address"
+        },
+        "universalResolver": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/address"
+        }
+      }
+    },
+    "ens": {
+      "type": "object",
+      "required": [
+        "registered"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "registered": {
+          "type": "boolean"
+        },
+        "owner": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/address"
+        },
+        "expectedOwner": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/address"
+        },
+        "ownerMatches": {
+          "type": "boolean"
+        },
+        "resolver": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/address"
+        },
+        "forwardAddress": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/address",
+          "description": "Address the name forward-resolves to THROUGH the Universal Resolver. A registered name with a zero resolver is not a usable identity and does not satisfy the postcondition."
+        },
+        "forwardResolutionMatches": {
+          "type": "boolean"
+        },
+        "expiry": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/unixSeconds"
+        },
+        "currentTokenId": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/uint256String",
+          "description": "Read at verification time. It is mutable and may differ from the value observed at binding time."
+        },
+        "reverseRecordSet": {
+          "type": "boolean",
+          "description": "Optional follow-up. Never required for registration success (D-003 scope)."
+        }
+      }
+    },
+    "identity": {
+      "type": "object",
+      "description": "Present when identity was requested. Absent when identity is none.",
+      "required": [
+        "requested",
+        "bound"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "requested": {
+          "const": "erc8004"
+        },
+        "bound": {
+          "type": "boolean"
+        },
+        "agentId": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/uint256String"
+        },
+        "adapterProxy": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/address"
+        },
+        "adapterImplementation": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/address"
+        },
+        "boundTokenId": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/uint256String",
+          "description": "Token ID observed at binding time. Gate: P-005. Informational once a resource anchor is in use, since the token ID is expected to change."
+        },
+        "boundTokenIdIsCurrent": {
+          "type": "boolean",
+          "description": "Gate: P-005. Meaningful only for a token-id anchor. False is TERMINAL: there is no unbind, so recovery means minting a fresh agent (E_IDENTITY_BINDING_ORPHANED), not resuming. Under a resource anchor this is expected to go false harmlessly after a role change, which is precisely why the resource anchor was adopted."
+        },
+        "controlVerified": {
+          "type": "boolean",
+          "description": "The expected owner still controls the ERC-8004 identity right now."
+        },
+        "agentUri": {
+          "type": "string"
+        },
+        "ensipRecordsPublished": {
+          "type": "boolean"
+        },
+        "anchor": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "value"
+          ],
+          "properties": {
+            "kind": {
+              "enum": [
+                "resource",
+                "token-id",
+                "labelhash"
+              ],
+              "description": "Which anchor the binding uses. resource is the accepted design (D-009); token-id and labelhash are recorded so an existing non-conforming binding can still be described and flagged."
+            },
+            "value": {
+              "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/resource"
+            },
+            "invariantUnderTokenIdChange": {
+              "type": "boolean",
+              "description": "True for resource. False for token-id."
+            },
+            "survivesReregistration": {
+              "type": "boolean",
+              "description": "MUST be false for a safe anchor. True means the anchor would follow a stranger who re-registers the name after expiry, inheriting this identity."
+            },
+            "epochEqualityChecked": {
+              "type": "boolean",
+              "description": "Whether the verifier re-read getResource(storedAnchor) and required it to equal the stored value. This single check fails closed on both expiry and re-registration."
+            }
+          },
+          "description": "Stable identity anchor. Gate: P-005."
+        },
+        "bindingStandard": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/bindingStandard"
+        },
+        "bindingStandardId": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/bindingStandardId"
+        },
+        "bindingMetadataAddress": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/address",
+          "description": "The 20-byte value read from the ERC-8004 registry's reserved agent-binding metadata key (ERC-8217 discovery). Read via getMetadata(agentId, 'agent-binding')."
+        },
+        "bindingMetadataMatches": {
+          "type": "boolean",
+          "description": "Whether bindingMetadataAddress equals adapterProxy. A stale or foreign value means the identity is discoverable as pointing at a DIFFERENT binding contract, which is a real failure rather than an advisory, so this is required whenever bound is true."
+        },
+        "ownerCheckMethod": {
+          "enum": [
+            "getOwner",
+            "ownerOf-getTokenId"
+          ],
+          "description": "Which accessor established live ownership. getOwner is absent on older registries; ownerOf(getTokenId(anyId)) is equivalent and universally available."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "bound": {
+                "const": true
+              }
+            },
+            "required": [
+              "bound"
+            ]
+          },
+          "then": {
+            "required": [
+              "bindingStandard",
+              "bindingMetadataMatches",
+              "anchor"
+            ]
+          },
+          "$comment": "A claimed binding must say which standard it used, prove the ERC-8217 discovery pointer resolves back to this adapter, and name its anchor. Without all three, bound:true is an unfalsifiable assertion."
+        },
+        {
+          "if": {
+            "properties": {
+              "bound": {
+                "const": true
+              }
+            },
+            "required": [
+              "bound"
+            ]
+          },
+          "then": {
+            "properties": {
+              "anchor": {
+                "properties": {
+                  "survivesReregistration": {
+                    "const": false
+                  }
+                },
+                "required": [
+                  "survivesReregistration"
+                ]
+              }
+            }
+          },
+          "$comment": "D-009. An anchor that survives re-registration is the capture scenario the decision exists to prevent: it follows whoever re-registers the name after expiry and hands them the previous holder's identity. The field's own description said MUST be false; that is now enforced rather than described."
+        },
+        {
+          "if": {
+            "properties": {
+              "bound": {
+                "const": true
+              },
+              "anchor": {
+                "properties": {
+                  "kind": {
+                    "const": "resource"
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
+              }
+            },
+            "required": [
+              "bound",
+              "anchor"
+            ]
+          },
+          "then": {
+            "properties": {
+              "anchor": {
+                "properties": {
+                  "epochEqualityChecked": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "epochEqualityChecked"
+                ]
+              }
+            }
+          },
+          "$comment": "D-009 verification is epoch equality, not a bare read: re-read getResource(storedAnchor) and require it to equal the stored value. A resource anchor claimed without that re-read is exactly the distinction the decision draws, so bound cannot be asserted without it."
+        }
+      ]
+    },
+    "checks": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Itemised evidence. Each check reports expected and actual, so a failure is diagnosable without re-running the verifier.",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "passed"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": {
+            "type": "string"
+          },
+          "expected": {
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ]
+          },
+          "actual": {
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ]
+          },
+          "passed": {
+            "type": "boolean"
+          },
+          "severity": {
+            "enum": [
+              "required",
+              "advisory"
+            ]
+          }
+        }
+      }
+    },
+    "evidenceSource": {
+      "type": "object",
+      "description": "How the reads were obtained. Two independent endpoints are consulted so a single equivocating RPC cannot manufacture a passing result (gap E9).",
+      "required": [
+        "rpcEndpointCount",
+        "endpointsAgree"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "rpcEndpointCount": {
+          "type": "integer",
+          "minimum": 2,
+          "description": "At least two independent endpoints, so a single equivocating RPC cannot manufacture a passing result. The bound matches the requirement instead of merely describing it."
+        },
+        "endpointsAgree": {
+          "type": "boolean"
+        },
+        "blockNumber": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "providerAssertionsUsed": {
+          "const": false,
+          "description": "Structurally pinned to false. If a verifier ever needs to record that it used a provider assertion, that is a schema change and a decision, not a runtime option."
+        }
+      }
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "$ref": "urn:mm-ens-identity:schema:errors:1.0.0"
+      }
+    },
+    "custody": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "transferRequired",
+        "transferCompleted"
+      ],
+      "properties": {
+        "mode": {
+          "enum": [
+            "direct",
+            "sponsored-to-owner",
+            "provider-custody-transfer-last"
+          ]
+        },
+        "transferRequired": {
+          "type": "boolean",
+          "description": "True exactly when mode is provider-custody-transfer-last."
+        },
+        "transferCompleted": {
+          "type": "boolean",
+          "description": "Whether the name actually left provider custody and reached the intended owner."
+        },
+        "interimHolder": {
+          "$ref": "urn:mm-ens-identity:schema:common-primitives:1.0.0#/$defs/address",
+          "description": "Who held the name during the custody window."
+        },
+        "finalOwnerIsIntendedOwner": {
+          "type": "boolean"
+        }
+      },
+      "description": "Custody completion. WS03 requires custody to be explicit in both the signed intent and the final verification. Without this a provider-custody-transfer-last job could pass every other check while quietly never completing the transfer.",
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "mode": {
+                "const": "provider-custody-transfer-last"
+              }
+            },
+            "required": [
+              "mode"
+            ]
+          },
+          "then": {
+            "properties": {
+              "transferRequired": {
+                "const": true
+              }
+            }
+          },
+          "$comment": "transferRequired is derived from the mode, not asserted independently. A custodial mode that claims no transfer is required is self-contradictory."
+        },
+        {
+          "if": {
+            "properties": {
+              "mode": {
+                "enum": [
+                  "direct",
+                  "sponsored-to-owner"
+                ]
+              }
+            },
+            "required": [
+              "mode"
+            ]
+          },
+          "then": {
+            "properties": {
+              "transferRequired": {
+                "const": false
+              }
+            }
+          },
+          "$comment": "Neither mode ever places the name in provider custody, so neither can require a transfer out of it."
+        }
+      ]
+    }
+  }
+}

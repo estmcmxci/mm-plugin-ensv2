@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:mm-ens-identity:schema:common-primitives:1.0.0",
+  "title": "Common primitives",
+  "description": "Shared primitive definitions for every program schema. Support artifact for wave 1: it exists so that address, hash, big-integer, chain and timestamp encodings cannot drift between the seven contract schemas. It defines no contract of its own and is frozen with wave 1.",
+  "version": "1.0.0",
+  "$defs": {
+    "address": {
+      "type": "string",
+      "pattern": "^0x[0-9a-fA-F]{40}$",
+      "description": "EVM address. Mixed case is permitted so EIP-55 checksummed values round-trip, but all comparisons are case-insensitive. Never infer a chain from an address."
+    },
+    "hash32": {
+      "type": "string",
+      "pattern": "^0x[0-9a-fA-F]{64}$",
+      "description": "32-byte hash, lowercase hex preferred."
+    },
+    "uint256String": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]{0,77})$",
+      "description": "Unsigned integer as a canonical decimal string. Used wherever a value may exceed the JSON safe-number bound; never encoded as a JSON number."
+    },
+    "unixSeconds": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 253402300799,
+      "description": "Unix timestamp in seconds. Bounded to year 9999 so it stays inside the JSON safe-integer range."
+    },
+    "caip2": {
+      "type": "string",
+      "pattern": "^eip155:[0-9]{1,32}$",
+      "description": "CAIP-2 chain identifier, for example eip155:11155111 for Sepolia. Chain identity is always explicit and never inferred from an address or a provider URL."
+    },
+    "deploymentId": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{2,63}$",
+      "description": "Stable identifier for one pinned protocol deployment, for example ensv2-sepolia-2026-07-30. Carried through every plan, job, receipt and verification result."
+    },
+    "ensName": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 255,
+      "description": "ENS name. A normalized field holds the ENSIP-15 normalized form; an input field may hold the raw user string."
+    },
+    "isoTimestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC 3339 timestamp in UTC, for human-facing and log-facing fields."
+    },
+    "httpsUrl": {
+      "type": "string",
+      "format": "uri",
+      "pattern": "^https://",
+      "description": "HTTPS URL. Plain HTTP is rejected so provider identity and payment challenges cannot be observed or rewritten in transit."
+    },
+    "secretRef": {
+      "type": "string",
+      "pattern": "^ref:[a-z0-9][a-z0-9._:-]{2,127}$",
+      "description": "Opaque handle to a secret held in a local keystore or provider vault. This is the ONLY way a commitment secret may appear in any program artifact. It is a lookup key, not a derivation of the secret, and it must not be reversible to the secret value."
+    },
+    "noSecrets": {
+      "description": "Structural guard asserting that an object does not carry secret material. Applied with allOf at the top level of every schema that could plausibly be used to smuggle one, and to free-form detail objects. This makes the redaction requirement in AGENTS.md mechanically testable rather than advisory.",
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "secret"
+            ]
+          },
+          {
+            "required": [
+              "commitmentSecret"
+            ]
+          },
+          {
+            "required": [
+              "privateKey"
+            ]
+          },
+          {
+            "required": [
+              "mnemonic"
+            ]
+          },
+          {
+            "required": [
+              "seedPhrase"
+            ]
+          },
+          {
+            "required": [
+              "paymentAuthorization"
+            ]
+          },
+          {
+            "required": [
+              "paymentPayload"
+            ]
+          },
+          {
+            "required": [
+              "authorization"
+            ]
+          },
+          {
+            "required": [
+              "credentials"
+            ]
+          }
+        ]
+      }
+    },
+    "resource": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]{0,77})$",
+      "description": "ENSv2 registry resource: the labelhash with its low 32 bits replaced by the entry's EAC version counter (LibLabel.withVersion). Canonical decimal string, matching currentTokenId and agentId rather than hex. Invariant under token-ID regeneration from role changes, and NOT invariant across expiry, unregister or re-registration, which is exactly the property that makes it safe as an identity anchor. See D-009."
+    },
+    "bindingStandard": {
+      "enum": [
+        "erc721",
+        "erc1155",
+        "erc6909",
+        "erc1155f",
+        "erc6909f",
+        "contract",
+        "contract-ownable"
+      ],
+      "description": "Adapter8004 binding standard, spelled to match tokenModel.standard. Append-only: the on-chain numeric values are normative and permanent, so a value may be appended but never renumbered or respelled. No ENSv2/resource-anchored value exists upstream yet and one must not be invented here. Gate: P-005."
+    },
+    "bindingStandardId": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 6,
+      "description": "Numeric value returned by bindingOf(agentId). Authoritative: the string spelling is for humans, this is what the chain returns. erc721=0, erc1155=1, erc6909=2, erc1155f=3, erc6909f=4, contract=5, contract-ownable=6. Gate: P-005."
+    }
+  }
+}
