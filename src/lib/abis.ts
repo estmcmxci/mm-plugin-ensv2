@@ -79,6 +79,8 @@ export const adapter8004Abi = parseAbi([
   "function isController(uint256 agentId, address account) external view returns (bool)",
   "function ownerOf(uint256 agentId) external view returns (address)",
   "function tokenURI(uint256 agentId) external view returns (string)",
+  "function setAgentURI(uint256 agentId, string newURI) external",
+  "event AgentURISet(uint256 indexed agentId, string newURI, address indexed updatedBy)",
   "event AgentBound(uint256 indexed agentId, uint8 indexed standard, address indexed tokenContract, uint256 tokenId, address registeredBy)",
 ]);
 
