@@ -19,6 +19,11 @@
  *    registry reports eacVersionId + 1, a scope that does not yet exist.
  *  - findResolver's `offset` is the signal for "this name's own resolver"
  *    (0) versus "inherited from an ancestor suffix" (non-zero).
+ *
+ * Generations: resolution (findResolver / resolve / reverse) is on the
+ * Universal Resolver for both, so every read below is generation-independent
+ * except registry NAVIGATION, which moved to UniversalHelper on g2. That one
+ * difference is confined to `registryNavigator()`.
  */
 import {
   createPublicClient,
@@ -33,7 +38,7 @@ import {
 } from "viem";
 import { sepolia } from "viem/chains";
 import { labelhash } from "viem/ens";
-import { registryAbi, universalResolverAbi } from "./abis.js";
+import { registryAbi, universalHelperAbi, universalResolverAbi } from "./abis.js";
 import type { EnsV2Deployment } from "./deployments.js";
 import { V2Status } from "./ensv2.js";
 import { dnsDecode, dnsEncode, leafLabel, normalizeName } from "./names.js";
@@ -64,6 +69,39 @@ export function ensClient(host: PublicClient, chainId: number): PublicClient {
 
 const hex = (n: bigint): Hex => `0x${n.toString(16)}`;
 const orNull = (a: Address): Address | null => (isAddressEqual(a, zeroAddress) ? null : a);
+
+/**
+ * Where registry navigation (findCanonicalRegistry / findParentRegistry /
+ * findExactRegistry) lives for this deployment.
+ *
+ * g1: the Universal Resolver answers them itself.
+ * g2: they moved to UniversalHelper — the g2 UR REVERTS on them (verified live
+ *     2026-09-04). Resolution itself (findResolver / resolve / reverse) stays
+ *     on the UR on both generations.
+ *
+ * Throws rather than silently reading the wrong contract if a g2 table is
+ * missing its helper; the gate refuses such a table first, this is the
+ * belt-and-braces for a caller that skipped it.
+ */
+export function registryNavigator(d: EnsV2Deployment): { address: Address; abi: typeof universalHelperAbi | typeof universalResolverAbi } {
+  if (d.generation === "g2") {
+    if (!d.universalHelper) {
+      throw new ReadError(
+        "ENSV2_DEPLOYMENT_INCOMPLETE",
+        `Deployment ${d.deploymentId} is generation g2 but declares no universalHelper.`,
+        "Registry navigation on this generation lives on UniversalHelper; refusing to guess.",
+      );
+    }
+    return { address: d.universalHelper, abi: universalHelperAbi };
+  }
+  return { address: d.universalResolver, abi: universalResolverAbi };
+}
+
+/** findParentRegistry through whichever contract answers it on this deployment. */
+async function findParentRegistry(client: PublicClient, d: EnsV2Deployment, dns: Hex): Promise<Address> {
+  const nav = registryNavigator(d);
+  return client.readContract({ address: nav.address, abi: nav.abi, functionName: "findParentRegistry", args: [dns] }) as Promise<Address>;
+}
 
 // ---------------------------------------------------------------------------
 // resolver
@@ -101,12 +139,7 @@ export async function resolverInfo(client: PublicClient, d: EnsV2Deployment, raw
   const kind: ResolverKind = isAddressEqual(found.resolver, zeroAddress) ? "none" : offset === 0 ? "own" : "inherited";
   const inheritedFrom = kind === "inherited" ? dnsDecode(hexToBytes(dns), offset) : null;
 
-  const registryAddr = await client.readContract({
-    address: d.universalResolver,
-    abi: universalResolverAbi,
-    functionName: "findParentRegistry",
-    args: [dns],
-  });
+  const registryAddr = await findParentRegistry(client, d, dns);
   const registry = orNull(registryAddr);
 
   let registryResolver: Address | null = null;
@@ -154,12 +187,7 @@ export async function whois(client: PublicClient, d: EnsV2Deployment, rawName: s
   const name = normalizeName(rawName);
   const dns = dnsEncode(name);
 
-  const registryAddr = await client.readContract({
-    address: d.universalResolver,
-    abi: universalResolverAbi,
-    functionName: "findParentRegistry",
-    args: [dns],
-  });
+  const registryAddr = await findParentRegistry(client, d, dns);
   if (isAddressEqual(registryAddr, zeroAddress)) {
     throw new ReadError(
       "ENSV2_NAME_NOT_FOUND",
