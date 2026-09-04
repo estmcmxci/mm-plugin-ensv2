@@ -17,7 +17,8 @@ export default class EnsV2JobsShow extends PluginCommand<ShowResult> {
   static override description = "Show a provisioning job's intent, record, receipts and errors. The commitment secret is redacted.";
   static override examples = ["<%= config.bin %> ensv2 jobs show 3f2a…", "<%= config.bin %> ensv2 jobs show 3f2a… --json"];
 
-  static override requiresAuth = false;
+  // Local file reads only, but declared wallet-read like every other read command; requiresAuth matches that grant.
+  static override requiresAuth = true;
   static override requiresInit = false;
   static override flags = schemaToFlags(inputs);
   static override args = schemaToArgs(inputs);

@@ -8,14 +8,15 @@ import {
   schemaToFlags,
 } from "@metamask/agent-wallet/plugin";
 import { readFileSync } from "node:fs";
-import { parseUnits } from "viem";
+import { isAddressEqual, parseUnits } from "viem";
 import { erc20Abi } from "../../lib/abis.js";
 import { viemProvisionChain } from "../../lib/chain.js";
 import { parseChainId, requireEnsV2 } from "../../lib/gate.js";
 import { defaultStore, engineDeps, jobErrorToCommandError, programErrorToCommandError, summarize, type JobSummary } from "../../lib/hostjobs.js";
 import type { JobRecord } from "../../lib/jobs.js";
 import { ethLabel } from "../../lib/names.js";
-import { observeJob, planProvision, runJob, stepsFor, type ProvisionRequest, type StepObservation } from "../../lib/provision.js";
+import { clearPending, getPending } from "../../lib/pending.js";
+import { adoptLegacyCommitment, observeJob, planProvision, runJob, stepsFor, type ProvisionRequest, type StepObservation } from "../../lib/provision.js";
 import { defaultContext, endpointKey, parseEndpoints, validateEndpoints, validateProfile } from "../../lib/records.js";
 import { yearsToSeconds } from "../../lib/registrar.js";
 import { selectedEvmAddress } from "../../lib/wallet.js";
@@ -185,7 +186,14 @@ export default class EnsV2Provision extends PluginCommand<ProvisionResult | Prov
 
       if (plan.kind === "existing" && !plan.inputsMatch) throw programErrorToCommandError(plan.conflict!, store);
       if (plan.kind === "new") {
+        // A checkpoint left by `ensv2 register` in ~/.mm-plugin-ensv2/pending-registrations.json for this label is
+        // adopted into the job — same secret, same commitment, nothing re-committed — and then removed. Standalone
+        // `register` is untouched by this and keeps its own checkpoint file.
+        const legacy = getPending(chainId, label);
+        const adopted = !!legacy && isAddressEqual(legacy.owner, owner) && adoptLegacyCommitment(plan.file, legacy);
+        if (adopted) io.log("info", `Adopted the pending registration checkpoint for ${name} into job ${plan.file.job.jobId}.`);
         await store.put(plan.file);
+        if (adopted) clearPending(chainId, label);
         io.log("info", `Created job ${plan.file.job.jobId} at ${store.location(plan.file.job.jobId)}`);
       } else {
         io.log("info", `Resuming job ${plan.file.job.jobId} (${plan.file.job.state}) from ${store.location(plan.file.job.jobId)}`);
@@ -205,7 +213,9 @@ export default class EnsV2Provision extends PluginCommand<ProvisionResult | Prov
       return `${r.existingJob ? "Existing" : "New"} job ${r.jobId}${r.conflict ? ` — CONFLICT ${r.conflict}` : ""}: would submit ${r.wouldSubmit.length ? r.wouldSubmit.join(", ") : "nothing"}. Nothing was written or sent.`;
     }
     const v = r.verification ? `verification ${r.verification.outcome} (${r.verification.passed}/${r.verification.total} checks)` : "not verified";
-    return `${r.job.name} ${r.job.state}${r.resumed ? " (resumed)" : ""}: ${v}${r.agentId ? `, agent #${r.agentId}` : ""}, ${r.transactionHashes.length} tx — job ${r.job.jobId}`;
+    const line = `${r.job.name} ${r.job.state}${r.resumed ? " (resumed)" : ""}: ${v}${r.agentId ? `, agent #${r.agentId}` : ""}, ${r.transactionHashes.length} tx — job ${r.job.jobId}`;
+    // The reverse record is the one thing a job does not write (see README); the follow-up is a separate, verified command.
+    return r.job.state === "completed" ? `${line}. Next: mm ensv2 primary set ${r.job.name}` : line;
   }
 }
 

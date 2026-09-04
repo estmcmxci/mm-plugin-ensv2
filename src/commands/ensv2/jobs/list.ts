@@ -10,13 +10,14 @@ type ListResult = { dir: string; count: number; jobs: JobSummary[] };
 
 /**
  * `mm ensv2 jobs list [--all]` — the provisioning jobs on this machine, newest
- * first. Local file reads only; no wallet, no chain.
+ * first. Local file reads only.
  */
 export default class EnsV2JobsList extends PluginCommand<ListResult> {
   static override description = "List durable provisioning jobs (~/.mm-plugin-ensv2/jobs). Local only.";
   static override examples = ["<%= config.bin %> ensv2 jobs list", "<%= config.bin %> ensv2 jobs list --all --json"];
 
-  static override requiresAuth = false;
+  // Local file reads only, but declared wallet-read like every other read command; requiresAuth matches that grant.
+  static override requiresAuth = true;
   static override requiresInit = false;
   static override flags = schemaToFlags(inputs);
   static override args = schemaToArgs(inputs);
