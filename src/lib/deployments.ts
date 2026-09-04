@@ -43,6 +43,10 @@ export type EnsV2Deployment = {
   readonly resolverImplementation: `0x${string}`;
   readonly resolverProxyLogic: `0x${string}`;
   readonly subregistryImplementation: `0x${string}`;
+  /** Adapter8004 proxy (unruggable-labs/adapter). Mints on the canonical ERC-8004 registry and binds the agent to a token. */
+  readonly adapter8004: `0x${string}`;
+  /** Canonical ERC-8004 IdentityRegistry, as reported by adapter8004.identityRegistry(). */
+  readonly identityRegistry: `0x${string}`;
 };
 
 export const SEPOLIA: EnsV2Deployment = {
@@ -57,6 +61,9 @@ export const SEPOLIA: EnsV2Deployment = {
   resolverImplementation: "0x9EAe5C2730a7dD16BDD1DeE6421a1B91e3B0365e",
   resolverProxyLogic: "0xA136BeE4E37B44586242e516a39893EfD54315e9",
   subregistryImplementation: "0x624a25d67B59D587752EbEc8DdeD8827dAe52050",
+  // Adapter README + live EIP-1967 slot (impl 0x31a68E5b…) + identityRegistry() call, all checked 2026-09-03.
+  adapter8004: "0x7621630cB63a73a194f45A3E6801B8C6A7eC2f92",
+  identityRegistry: "0x8004A818BFB912233c491871b3d84c89A494BD9e",
 };
 
 export const DEPLOYMENTS: Readonly<Record<number, EnsV2Deployment>> = {

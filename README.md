@@ -22,6 +22,8 @@ mm ensv2 available <name>    can this .eth label be registered? (asks the regist
 mm ensv2 price <name>        ERC-20 cost to register, quoted by the registrar (--years n, default 1)
 mm ensv2 faucet              mint Sepolia test USDC to this wallet (the beta's payment token) — Sepolia only
 mm ensv2 register <name>     commit → wait → register, paid in USDC, resolver bound at registration; resumable
+mm ensv2 agent register <name> --uri <agentURI>   mint an ERC-8004 agent via Adapter8004, bound to your name (one tx)
+mm ensv2 agent info <name> [--agent-id n]         the binding, orphan check, controller check, NFT holder, agentURI
 mm ensv2 resolver plan       predict THIS WALLET's resolver address + show the deploy calldata (read-only)
 mm ensv2 resolver deploy     deploy this wallet's resolver, once (no-op if it exists) — signs via MetaMask policy
 ```
@@ -41,6 +43,12 @@ Three transactions, each signed through MetaMask policy (MFA if enabled), each v
 3. after chain time ≥ commit + 60 s: `register(...)` — pays the registrar, mints the name, sets the resolver in one call.
 
 Then it checks the registry says `REGISTERED` to you and `UR.findResolver` returns your resolver at offset 0, and clears the checkpoint. Re-running after an interruption resumes with the same secret and commitment; an expired commitment (> 24 h) is re-committed. Price is quoted by the registrar (non-linear over duration; 28-day minimum) and paid in the oracle's ERC-20 — on Sepolia, `mm ensv2 faucet` mints it.
+
+### How `agent register` works — and its one limitation
+
+Adapter8004 (`unruggable-labs/adapter`) mints an agent on the canonical ERC-8004 IdentityRegistry and binds it to a token you control; the adapter holds the NFT and you control it through the token. For an ENSv2 name, the token is the name's entry in **the registry that holds it** (located via `UR.findParentRegistry`, never assumed) with its **current** token id from `getState()`. The adapter's ERC-721 control check calls `ownerOf(tokenId)` on that registry, which the ENSv2 ERC-1155 singleton exposes. One transaction; the agent id is read from the `AgentBound` event and the binding, controller status, and NFT holder are re-read from chain before success is reported.
+
+**The binding anchors on the token id, and ENSv2 regenerates that id on any role grant or revoke.** Bind, then delegate a role on the name → the binding points at a stale id. `agent info` reports `status: orphaned` when the bound id no longer matches the current one. Transfers and renewals do not change the id. A resource-anchored binding that survives role changes is being prepared upstream; until it lands, treat role changes on a bound name as a re-bind trigger.
 
 ### Installing on a machine where `npm` stalls over IPv6
 
