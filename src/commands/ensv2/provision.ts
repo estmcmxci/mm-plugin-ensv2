@@ -13,7 +13,7 @@ import { erc20Abi } from "../../lib/abis.js";
 import { viemProvisionChain } from "../../lib/chain.js";
 import { parseChainId, requireEnsV2 } from "../../lib/gate.js";
 import { defaultStore, engineDeps, jobErrorToCommandError, programErrorToCommandError, summarize, type JobSummary } from "../../lib/hostjobs.js";
-import { redactJobFile, type JobRecord } from "../../lib/jobs.js";
+import type { JobRecord } from "../../lib/jobs.js";
 import { ethLabel } from "../../lib/names.js";
 import { observeJob, planProvision, runJob, stepsFor, type ProvisionRequest, type StepObservation } from "../../lib/provision.js";
 import { defaultContext, endpointKey, parseEndpoints, validateEndpoints, validateProfile } from "../../lib/records.js";
@@ -222,5 +222,3 @@ export function toResult(job: JobRecord, resumed: boolean, summary: JobSummary):
     transactionHashes: job.result?.transactionHashes ?? [],
   };
 }
-
-export { redactJobFile };

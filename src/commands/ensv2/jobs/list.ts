@@ -32,7 +32,7 @@ export default class EnsV2JobsList extends PluginCommand<ListResult> {
   }
 
   override successHint(r: ListResult): string {
-    if (!r.count) return `No ${"jobs"} in ${r.dir}. Start one with \`mm ensv2 provision <name> --agent-uri <uri>\`.`;
+    if (!r.count) return `No jobs in ${r.dir}. Start one with \`mm ensv2 provision <name> --agent-uri <uri>\`.`;
     return r.jobs.map((j) => `${j.jobId}  ${j.name}  ${j.state}${j.blockedBy ? ` [${j.blockedBy}]` : ""}${j.resumeFrom ? ` → ${j.resumeFrom}` : ""}  ${j.updatedAt}`).join("\n");
   }
 }
