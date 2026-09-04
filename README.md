@@ -50,7 +50,12 @@ Then it checks the registry says `REGISTERED` to you and `UR.findResolver` retur
 NODE_OPTIONS=--dns-result-order=ipv4first mm plugins install file:$PWD/estmcmxci-mm-plugin-ensv2-0.1.0.tgz --accept-permissions
 ```
 
-Reinstalling the same package name upgrades in place; no uninstall needed.
+**Upgrading an installed plugin requires an uninstall first** (Agent Wallet 6.2.0). Installing a newer tarball over an approved plugin does not re-run the consent screen — the stored approval keeps the old version and command list, and the runtime gate then denies every command with `did not declare the 'wallet-read' capability`. Bumping the version does not help. Reported upstream; until fixed:
+
+```bash
+NODE_OPTIONS=--dns-result-order=ipv4first mm plugins uninstall @estmcmxci/mm-plugin-ensv2
+NODE_OPTIONS=--dns-result-order=ipv4first mm plugins install file:$PWD/estmcmxci-mm-plugin-ensv2-<version>.tgz --accept-permissions
+```
 
 All commands run the same fail-closed gate first. `whois` and `resolver` locate the registry that actually holds the name (`UR.findParentRegistry`) rather than assuming the `.eth` registry — a subname's entry lives in its parent's subregistry, and reading the root for it returns a plausible-looking "AVAILABLE" for a name that is in fact registered.
 
