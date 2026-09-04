@@ -15,6 +15,8 @@ import { detectEnsV2, selfCheck } from "../dist/lib/ensv2.js";
 import { resolveQuery, resolverInfo, whois } from "../dist/lib/reads.js";
 import { buildDeployPlan, ownedResolverStatus } from "../dist/lib/resolver.js";
 import { agentInfo, bindPlan, findAgentIdsForName } from "../dist/lib/agent.js";
+import { defaultContext, endpointKey, planRecords, readRecordSet } from "../dist/lib/records.js";
+import { ensip25Key } from "../dist/lib/erc7930.js";
 import { decodeFunctionResult } from "viem";
 import { adapter8004Abi } from "../dist/lib/abis.js";
 import {
@@ -108,6 +110,26 @@ try {
       } catch (e) { sim = { ok: false, reverted: e.shortMessage ?? e.message }; }
       show({ name: plan.name, owner, tokenContract: plan.tokenContract, tokenId: "0x" + plan.tokenId.toString(16), standard: plan.standard, agentURI: plan.agentURI,
              calldata: { to: plan.calldata.to, selector: plan.calldata.data.slice(0, 10), bytes: (plan.calldata.data.length - 2) / 2 }, simulation: sim });
+      break;
+    }
+    case "records-get": {
+      // npm run check -- records-get <name> [agentId,...]
+      const d = await gate();
+      show(await readRecordSet(client, d, need(arg, "name"), { agentIds: process.argv[4] ? process.argv[4].split(",") : [] }));
+      break;
+    }
+    case "records-plan": {
+      // npm run check -- records-plan <name> <owner> <description> <webUrl> <agentId>
+      // Diff vs chain, build the multicall, eth_call it from the owner. Nothing sent.
+      const d = await gate();
+      const [name, owner, description, web, agentId] = [need(arg, "name"), need(process.argv[4], "owner"), process.argv[5] ?? "ENSv2 agent wallet on Sepolia", process.argv[6] ?? "https://estmcmxci.co", process.argv[7]];
+      const endpoints = { web };
+      const texts = { description, url: web, [endpointKey("web")]: web, "agent-context": defaultContext(name, description, endpoints, agentId) };
+      if (agentId) texts[ensip25Key(d.chainId, d.identityRegistry, agentId)] = "1";
+      const plan = await planRecords(client, d, name, owner, { addr: owner, texts });
+      let sim = "nothing to write";
+      if (plan.calldata) { try { await client.call({ account: owner, to: plan.calldata.to, data: plan.calldata.data }); sim = "ok (eth_call of the multicall from owner succeeds)"; } catch (e) { sim = "REVERTED: " + (e.shortMessage ?? e.message); } }
+      show({ name: plan.name, resolver: plan.resolver, calls: plan.calls, changes: Object.fromEntries(Object.entries(plan.changes).map(([k, c]) => [k, { from: c.from, to: c.to.length > 80 ? c.to.slice(0, 77) + "..." : c.to }])), unchanged: plan.unchanged, calldataBytes: plan.calldata ? (plan.calldata.data.length - 2) / 2 : 0, simulation: sim });
       break;
     }
     case "agent-info": {
