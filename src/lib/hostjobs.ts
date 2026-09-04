@@ -9,7 +9,7 @@ import { CommandError, type CommandIO, type PluginCommandContext } from "@metama
 import { createPublicClient, formatUnits, http, type Address, type PublicClient } from "viem";
 import { erc20Abi } from "./abis.js";
 import { viemProvisionChain, type ProvisionChain } from "./chain.js";
-import type { EnsV2Deployment } from "./deployments.js";
+import { deploymentByDeploymentId, type EnsV2Deployment } from "./deployments.js";
 import { toCommandError } from "./gate.js";
 import { FileJobStore, JobExistsError, type JobFile, type JobStore, type ProgramError } from "./jobs.js";
 import { walletResultToSubmitResult, type WalletResultLike } from "./executor.js";
@@ -89,6 +89,10 @@ export type JobSummary = {
   name: string;
   owner: Address;
   chain: string;
+  /** The deployment this job was created under, and can only be resumed under. */
+  deploymentId: string;
+  /** Its `--deployment` selector, when the id is one this build pins; null for a job from an unknown table. */
+  deployment: string | null;
   state: string;
   identity: string;
   agentId: string | null;
@@ -109,6 +113,8 @@ export function summarize(file: JobFile, store: JobStore): JobSummary {
     name: j.facts.normalizedName,
     owner: j.facts.owner,
     chain: j.chain,
+    deploymentId: j.deploymentId,
+    deployment: deploymentByDeploymentId(j.deploymentId)?.key ?? null,
     state: j.state,
     identity: j.identity,
     agentId: j.facts.erc8004AgentId ?? null,
