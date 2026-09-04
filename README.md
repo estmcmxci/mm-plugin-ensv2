@@ -1,15 +1,69 @@
 # @estmcmxci/mm-plugin-ensv2
 
-ENSv2 for the [MetaMask Agent Wallet](https://docs.metamask.io/agent-wallet/) CLI (`mm`). Sepolia only, by design — ENSv2 is a beta with non-final interfaces and this plugin refuses to run against anything else.
+[![npm](https://img.shields.io/npm/v/@estmcmxci/mm-plugin-ensv2?color=1c2123&label=npm)](https://www.npmjs.com/package/@estmcmxci/mm-plugin-ensv2) [![docs](https://img.shields.io/badge/docs-mm--ensv2.estmcmxci.co-1c2123)](https://mm-ensv2.estmcmxci.co)
+
+ENSv2 names and ERC-8004 agent identity, natively inside the [MetaMask Agent Wallet](https://docs.metamask.io/agent-wallet/) CLI (`mm`). An agent wallet can register an ENSv2 name it owns, deploy its own resolver, mint an ERC-8004 agent bound to that name, publish the ENSIP-25/26 records that make it discoverable, and set the name as its primary name — every signature routed through MetaMask policy and MFA, every write verified on chain before the command returns.
+
+**Sepolia beta only, by design.** ENSv2 is a beta with non-final interfaces; this plugin refuses to run against anything else, and it never falls back to ENSv1 behaviour. Docs, explainer and live evidence: **https://mm-ensv2.estmcmxci.co** (every page is also Markdown: append `.md`, or fetch `/llms.txt`).
+
+## Sixty seconds
+
+```bash
+mm ensv2 status                        # is this chain really serving ENSv2? five checks, refuses otherwise
+mm ensv2 faucet                        # 100 test USDC, the beta's payment token
+mm ensv2 provision myagent --agent-uri https://agent.example/agent.json --endpoints web=https://agent.example
+mm ensv2 primary set myagent.eth       # the wallet now resolves back to its name
+```
+
+`provision` runs resolver, commit, approve, register, agent bind and records as **one resumable job**. Kill it anywhere and run it again. It never pays twice.
 
 ## Install
 
+Requires MetaMask Agent Wallet **6.2.0+** (`mm --version`), Node 20+, and a wallet with a little Sepolia ETH (a full provisioning run is about 1.2M gas).
+
 ```bash
-mm config set experimentalPlugins true          # the plugin system itself is beta
-mm plugins install @estmcmxci/mm-plugin-ensv2   # once published
+mm config set experimentalPlugins true
 ```
 
-npm installs are verified against the registry; no unverified-install flag is needed.
+### From npm — currently blocked by a host bug, use the tarball route below
+
+The package is published, but Agent Wallet 6.2.0 has a bug in its post-install consent hook: a plugin installed **from the registry** is reported as `installed`, then immediately removed with `PLUGIN_MANIFEST_FILE_MISSING`, even though `oclif.manifest.json` is shipped and npm puts it on disk. Installs from a tarball take a different branch of that hook and work. Reported upstream. Until it is fixed, fetch the very same artifact from npm as a tarball and install that:
+
+```bash
+npm pack @estmcmxci/mm-plugin-ensv2            # downloads estmcmxci-mm-plugin-ensv2-<version>.tgz from the registry
+NODE_OPTIONS=--dns-result-order=ipv4first mm plugins install file:$PWD/estmcmxci-mm-plugin-ensv2-<version>.tgz --accept-permissions
+mm ensv2 status
+```
+
+`--accept-permissions` consents to the capabilities the plugin declares: `wallet-read` for every command, `wallet-submit` only for the commands that send a transaction. Install the **packed tarball**, never a directory: a directory install symlinks the plugin, and its own `node_modules/@metamask/agent-wallet` then shadows the running CLI (`window.addEventListener is not a function`).
+
+### Two more host quirks
+
+- **Upgrading needs an uninstall first.** 6.2.0 does not refresh a plugin's consent record when a newer version is installed over an approved one; the runtime gate then denies every command with `did not declare the 'wallet-read' capability`. Bumping the version does not help. `mm plugins uninstall @estmcmxci/mm-plugin-ensv2`, then install.
+- **npm can stall over IPv6.** `mm plugins install` shells out to `npm`, which on some networks sits on a dead IPv6 socket for its full fetch timeout. The `NODE_OPTIONS=--dns-result-order=ipv4first` prefix above forces IPv4 for that one command.
+
+### Verify
+
+`mm ensv2 status` must show `isV2: true` and five passing checks. `mm ensv2 status --chain 1` must refuse: no mainnet deployment exists, and that refusal is the plugin's first invariant.
+
+## For agents
+
+Every command accepts `--json`. The host wraps the result as `{ "ok": true, "data": … }` or `{ "ok": false, "error": { "code", "message", "hint" } }`. `error.code` is stable (`ENSV2_*` for the commands, the program's frozen `E_*` codes for the job engine) and `error.hint` always names the next action. The full code table is generated from source on the docs site: https://mm-ensv2.estmcmxci.co/reference/errors.
+
+| Step | Command | Precondition | Verify in `data` |
+|---|---|---|---|
+| 0 | `mm ensv2 status --json` | — | `isV2 === true`, every `checks[].ok` |
+| 1 | `mm ensv2 resolver deploy --json` | Sepolia ETH | `verified === true` |
+| 2 | `mm ensv2 available NAME.eth --json` | — | `available === true` |
+| 3 | `mm ensv2 faucet --json` | Sepolia | `balanceAfter` covers the quote |
+| 4 | `mm ensv2 register NAME.eth --json` | 1–3 | `status === "REGISTERED"`, `resolverBound` |
+| 5 | `mm ensv2 agent register NAME.eth --uri URI --json` | 4; URI serves an ERC-8004 registration file | `verified.bindingMatches && verified.ownerIsController` |
+| 6 | `mm ensv2 records set NAME.eth … --link-agent ID --json` | 5 | `verified === true` |
+| 7 | `mm ensv2 primary set NAME.eth --json` | 6 wrote `addr` | `verified === true` |
+
+Or steps 1–6 as one job: `mm ensv2 provision NAME … --json`, then `mm ensv2 jobs show JOBID --json`.
+
+Rules that keep you out of trouble: **never re-send a write because a call failed** (a failed call is not a failed transaction; re-run the same command and it re-derives state from chain, or read `jobs show`); every write has an inspectable plan (`resolver plan`, `provision --dry-run`, `records get`, `primary get`); every command is idempotent for the same inputs; mainnet is refused; the commit secret under `~/.mm-plugin-ensv2/` is private, do not read or move it.
 
 ## Commands
 
@@ -36,6 +90,37 @@ mm ensv2 jobs show <jobId>          a job's intent, record, step receipts and er
 mm ensv2 jobs resume <jobId>        continue a job; re-derives every step from chain, never repeats a paid step
 mm ensv2 jobs abandon <jobId>       set a finished or failed job aside (renamed, kept) so provision can start over
 ```
+
+Full reference with every flag, generated from the plugin's manifest: https://mm-ensv2.estmcmxci.co/reference/commands.
+
+## Live on Sepolia
+
+Two wallets, two names, two agents, every transaction verified independently with `cast` against a public RPC — receipts, decoded calldata, contract reads, Universal Resolver `resolve()` and `reverse()`.
+
+| Name | Owner | Resolver | Agent | Primary |
+|---|---|---|---|---|
+| `grilledcheese.eth` | `0x0943…7EE1` | `0xeda43c…D282` | #10058 | yes |
+| `sesquipedalian.eth` | `0x9bFF…034b` | `0x94a26d…27af` | #10059 | yes |
+
+The second run was a cold wallet start to finish, including a real network drop mid-registration that the resume path handled with no duplicate payment. Every hash, block and gas figure: https://mm-ensv2.estmcmxci.co/evidence.
+
+## How it works
+
+### Detection: fail closed
+
+All commands run the same fail-closed gate first. `whois` and `resolver` locate the registry that actually holds the name (`UR.findParentRegistry`) rather than assuming the `.eth` registry — a subname's entry lives in its parent's subregistry, and reading the root for it returns a plausible-looking "AVAILABLE" for a name that is in fact registered.
+
+`whois` reports `owner` only while `REGISTERED` (`latestOwner` is stale after expiry) and surfaces the **registration epoch** alongside the token id: token ids change on any role grant or revoke, so `(registry, canonicalId, registrationEpoch)` is the anchor to key identity off, never the token id.
+
+`status` fails closed. If the Universal Resolver is not serving ENSv2, or the chain's registry hierarchy disagrees with the configured deployment, the command exits non-zero instead of quietly behaving like ENSv1. Every write command added to this plugin runs the same check first.
+
+It performs five reads and reports each one:
+
+1. `UniversalResolver.supportsInterface(IUniversalResolverV2)` is true
+2. `UniversalResolver.findCanonicalRegistry("eth")` equals the configured `.eth` registry
+3. `RootRegistry.getSubregistry("eth")` points at that registry (forward)
+4. that registry's `getParent()` points back at the root with label `eth` (backward)
+5. `VerifiableFactory.proxyLogic()` matches the configured proxy logic, so CREATE2 resolver prediction is sound
 
 ### Why `resolver deploy` exists
 
@@ -106,35 +191,6 @@ One transaction — a `multicall` on the wallet's own resolver — writes everyt
 
 `records get` reads all of it **through the Universal Resolver** — never the resolver directly — and reports each key as `present`, `absent`, or `lookup_failed`, so an RPC outage never masquerades as "no record". ENSIP-25 defines no enumeration, so links are checked for the ids you pass (`--agent-ids`); an ensemble-cli `agent-ids` index is read for compatibility but never written. `agent info` performs the ENSIP-25 registry→ENS verification (`ensip25Linked`).
 
-### Installing on a machine where `npm` stalls over IPv6
-
-`mm plugins install` shells out to `npm`, which on some networks sits on a dead IPv6 socket to the registry for its full 5-minute fetch timeout. Force IPv4 for that one command:
-
-```bash
-NODE_OPTIONS=--dns-result-order=ipv4first mm plugins install file:$PWD/estmcmxci-mm-plugin-ensv2-0.1.0.tgz --accept-permissions
-```
-
-**Upgrading an installed plugin requires an uninstall first** (Agent Wallet 6.2.0). Installing a newer tarball over an approved plugin does not re-run the consent screen — the stored approval keeps the old version and command list, and the runtime gate then denies every command with `did not declare the 'wallet-read' capability`. Bumping the version does not help. Reported upstream; until fixed:
-
-```bash
-NODE_OPTIONS=--dns-result-order=ipv4first mm plugins uninstall @estmcmxci/mm-plugin-ensv2
-NODE_OPTIONS=--dns-result-order=ipv4first mm plugins install file:$PWD/estmcmxci-mm-plugin-ensv2-<version>.tgz --accept-permissions
-```
-
-All commands run the same fail-closed gate first. `whois` and `resolver` locate the registry that actually holds the name (`UR.findParentRegistry`) rather than assuming the `.eth` registry — a subname's entry lives in its parent's subregistry, and reading the root for it returns a plausible-looking "AVAILABLE" for a name that is in fact registered.
-
-`whois` reports `owner` only while `REGISTERED` (`latestOwner` is stale after expiry) and surfaces the **registration epoch** alongside the token id: token ids change on any role grant or revoke, so `(registry, canonicalId, registrationEpoch)` is the anchor to key identity off, never the token id.
-
-`status` fails closed. If the Universal Resolver is not serving ENSv2, or the chain's registry hierarchy disagrees with the configured deployment, the command exits non-zero instead of quietly behaving like ENSv1. Every write command added to this plugin runs the same check first.
-
-It performs five reads and reports each one:
-
-1. `UniversalResolver.supportsInterface(IUniversalResolverV2)` is true
-2. `UniversalResolver.findCanonicalRegistry("eth")` equals the configured `.eth` registry
-3. `RootRegistry.getSubregistry("eth")` points at that registry (forward)
-4. that registry's `getParent()` points back at the root with label `eth` (backward)
-5. `VerifiableFactory.proxyLogic()` matches the configured proxy logic, so CREATE2 resolver prediction is sound
-
 ### Primary name (`primary set`)
 
 Forward resolution (`name → address`) lives on your resolver; the reverse direction (`address → name`) lives in a separate namespace, `addr.reverse`. **At ENSv2 launch that namespace is still v1 infrastructure**: the v2 root registry binds the `reverse` TLD to `ENSV1Resolver`, which mirrors the v1 registry, and the Universal Resolver's `reverse()` reads through it. So a primary name is set by calling the **v1 `ReverseRegistrar.setName(name)`** from the wallet itself — one transaction that claims `<you>.addr.reverse` and writes the name. This is what the ENS docs prescribe ("Reverse Resolution — At Launch") and what the official `ens-cli` does.
@@ -158,20 +214,11 @@ npm run check -- primary-plan name.eth 0xYourAddress
 npm run check -- provision-plan <name> <owner> [agentURI|none] [years]   # the intent, job id, steps and what each observes; eth_call only
 ```
 
-Install into `mm` from a **packed tarball**, not the directory:
-
-```bash
-npm pack
-mm plugins install file:$PWD/estmcmxci-mm-plugin-ensv2-0.1.0.tgz --accept-permissions
-mm ensv2 status
-mm ensv2 status --json
-```
-
-Why the tarball: a directory install symlinks the plugin, and this directory's own `node_modules/@metamask/agent-wallet` then shadows the running CLI — every command dies with `window.addEventListener is not a function`. The tarball is copied into the CLI's plugin directory and resolves the host's wallet correctly.
+Then `npm pack` and install the tarball as above. The docs site lives in `site/` (Vocs); its reference pages are generated from this package's manifest and source by `site/scripts/generate.mjs`.
 
 ## Where the addresses come from
 
-`src/lib/deployments.ts`. Provenance is the checked-in Sepolia deployment artifacts in `ensdomains/contracts-v2`, cross-checked against `ensdomains/ens-cli` and verified live. They are never trusted blindly: `status` re-derives the registry from chain and refuses if the table disagrees.
+`src/lib/deployments.ts`. Provenance is the official ENS deployment table, the checked-in Sepolia deployment artifacts in `ensdomains/contracts-v2`, and `ensdomains/ens-cli`, all cross-checked and verified live. They are never trusted blindly: `status` re-derives the registry from chain and refuses if the table disagrees; the resolver factory's clone target, the adapter implementation (EIP-1967 slot) and the reverse registrar (root → reverse TLD resolver → v1 registry) are each re-derived on use.
 
 ## Design notes
 
@@ -181,3 +228,7 @@ Why the tarball: a directory install symlinks the plugin, and this directory's o
 - Signing never happens in the plugin. Write commands build calldata and hand it to `ctx.walletExecutor()`.
 - The job engine (`src/lib/provision.ts`) imports nothing from the host: it reads through `ProvisionChain` and sends through `Submit`, so the interruption matrix runs against an in-memory chain that applies the engine's real calldata (`test/mock-chain.mjs`), and `scripts/check.mjs provision-plan` runs the planner against public Sepolia.
 - The schemas under `schemas/` are consumed, never edited (D-011 additive-only freeze). `src/lib/schema.ts` is a small draft 2020-12 validator covering exactly the keywords they use; `test/schema.test.mjs` requires the same answers as the program's ajv runner on all 75 vendored fixtures.
+
+## License
+
+MIT. Built by 𝔪✶ [Émile Marcel Agustín](https://estmcmxci.co).
