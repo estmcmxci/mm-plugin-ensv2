@@ -24,6 +24,8 @@ mm ensv2 faucet              mint Sepolia test USDC to this wallet (the beta's p
 mm ensv2 register <name>     commit → wait → register, paid in USDC, resolver bound at registration; resumable
 mm ensv2 agent register <name> --uri <agentURI>   mint an ERC-8004 agent via Adapter8004, bound to your name (one tx)
 mm ensv2 agent info <name> [--agent-id n]         the binding, orphan check, controller check, NFT holder, agentURI
+mm ensv2 records set <name> [...]   addr + profile (ENSIP-5/12/18) + agent-context/agent-endpoint (ENSIP-26) + ENSIP-25 link, ONE tx
+mm ensv2 records get <name>         the record set as a stranger sees it, read through the Universal Resolver
 mm ensv2 resolver plan       predict THIS WALLET's resolver address + show the deploy calldata (read-only)
 mm ensv2 resolver deploy     deploy this wallet's resolver, once (no-op if it exists) — signs via MetaMask policy
 ```
@@ -49,6 +51,20 @@ Then it checks the registry says `REGISTERED` to you and `UR.findResolver` retur
 Adapter8004 (`unruggable-labs/adapter`) mints an agent on the canonical ERC-8004 IdentityRegistry and binds it to a token you control; the adapter holds the NFT and you control it through the token. For an ENSv2 name, the token is the name's entry in **the registry that holds it** (located via `UR.findParentRegistry`, never assumed) with its **current** token id from `getState()`. The adapter's ERC-721 control check calls `ownerOf(tokenId)` on that registry, which the ENSv2 ERC-1155 singleton exposes. One transaction; the agent id is read from the `AgentBound` event and the binding, controller status, and NFT holder are re-read from chain before success is reported.
 
 **The binding anchors on the token id, and ENSv2 regenerates that id on any role grant or revoke.** Bind, then delegate a role on the name → the binding points at a stale id. `agent info` reports `status: orphaned` when the bound id no longer matches the current one. Transfers and renewals do not change the id. A resource-anchored binding that survives role changes is being prepared upstream; until it lands, treat role changes on a bound name as a re-bind trigger.
+
+### The record set (`records set`)
+
+One transaction — a `multicall` on the wallet's own resolver — writes everything that makes the name an agent identity, and only the keys whose on-chain value differs:
+
+| Key | Spec | Rule enforced before signing |
+|---|---|---|
+| `addr` | ENSIP-1 | defaults to the wallet; `--addr none` to skip |
+| `description`, `url`, `avatar`, `alias` | ENSIP-5 / 12 / 18 | `description` ≤ 160 chars; `url` http(s); `avatar` must be `https://`, `ipfs://`, `data:image/…`, or `eip155:<chain>/erc721|erc1155:<address>/<id>` |
+| `agent-context` | ENSIP-26 | free-form; a Markdown stub is generated if none is given and none exists |
+| `agent-endpoint[mcp|a2a|web]` | ENSIP-26 | `--endpoints mcp=<url>,web=<url>`; URLs or `ipfs://`; unknown protocols allowed with a warning |
+| `agent-registration[<erc7930 registry>][<id>]` | ENSIP-25 | `--link-agent <id>`; registry = the canonical ERC-8004 IdentityRegistry, ERC-7930-encoded; value `"1"` |
+
+`records get` reads all of it **through the Universal Resolver** — never the resolver directly — and reports each key as `present`, `absent`, or `lookup_failed`, so an RPC outage never masquerades as "no record". ENSIP-25 defines no enumeration, so links are checked for the ids you pass (`--agent-ids`); an ensemble-cli `agent-ids` index is read for compatibility but never written. `agent info` performs the ENSIP-25 registry→ENS verification (`ensip25Linked`).
 
 ### Installing on a machine where `npm` stalls over IPv6
 

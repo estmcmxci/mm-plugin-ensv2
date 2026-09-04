@@ -93,6 +93,18 @@ export const identityRegistryAbi = parseAbi([
 ]);
 
 /**
+ * Resolver record surface — the DEPLOYED generation (namehash-keyed). Every
+ * selector confirmed present in 0x9EAe5C…'s bytecode on 2026-09-03.
+ */
+export const resolverAbi = parseAbi([
+  "function addr(bytes32 node) external view returns (address)",
+  "function text(bytes32 node, string key) external view returns (string)",
+  "function setAddr(bytes32 node, address a) external",
+  "function setText(bytes32 node, string key, string value) external",
+  "function multicall(bytes[] data) external returns (bytes[] results)",
+]);
+
+/**
  * PermissionedResolver — the DEPLOYED generation. Three-argument initializer,
  * selector 0x7058b559, confirmed by bytecode presence on
  * 0x9EAe5C2730a7dD16BDD1DeE6421a1B91e3B0365e (2026-09-03). The two-argument

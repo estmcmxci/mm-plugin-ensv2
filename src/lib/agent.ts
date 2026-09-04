@@ -24,7 +24,8 @@
 import { decodeEventLog, encodeFunctionData, isAddressEqual, parseAbiItem, type Address, type Hex, type PublicClient, type TransactionReceipt } from "viem";
 import { TOKEN_STANDARD, adapter8004Abi, identityRegistryAbi } from "./abis.js";
 import type { EnsV2Deployment } from "./deployments.js";
-import { ReadError, whois, type WhoisInfo } from "./reads.js";
+import { ensip25Key } from "./erc7930.js";
+import { ReadError, ensClient, whois, type WhoisInfo } from "./reads.js";
 import type { Calldata } from "./registrar.js";
 
 export const AGENT_BOUND = parseAbiItem(
@@ -108,6 +109,10 @@ export type AgentInfo = {
   nftHeldByAdapter: boolean;
   agentURI: string;
   status: "bound" | "orphaned" | "unbound";
+  /** ENSIP-25: agent-registration[<erc7930 identityRegistry>][<agentId>] on the name, read through the UR. */
+  ensip25Key: string;
+  /** true = non-empty (spec: verified); false = absent/empty; null = lookup failed. */
+  ensip25Linked: boolean | null;
 };
 
 /** Everything the chain says about one agent id relative to a name. */
@@ -122,7 +127,20 @@ export async function agentInfo(client: PublicClient, d: EnsV2Deployment, name: 
   const unbound = isAddressEqual(binding.tokenContract, "0x0000000000000000000000000000000000000000");
   const registryMatches = !unbound && isAddressEqual(binding.tokenContract, w.registry);
   const orphaned = !unbound && registryMatches && binding.tokenId !== BigInt(w.tokenId);
+
+  // ENSIP-25 verification flow, registry -> ENS: build the key, resolve the text record, non-empty == verified.
+  const key = ensip25Key(d.chainId, d.identityRegistry, agentId.toString());
+  let linked: boolean | null;
+  try {
+    const v = await ensClient(client, d.chainId).getEnsText({ name: w.name, key, universalResolverAddress: d.universalResolver });
+    linked = !!v;
+  } catch {
+    linked = null;
+  }
+
   return {
+    ensip25Key: key,
+    ensip25Linked: linked,
     name: w.name,
     agentId: agentId.toString(),
     registry: w.registry,
