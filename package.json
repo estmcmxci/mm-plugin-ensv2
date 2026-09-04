@@ -2,7 +2,7 @@
   "name": "@estmcmxci/mm-plugin-ensv2",
   "version": "0.7.0",
   "description": "ENSv2 for the MetaMask Agent Wallet CLI (mm): fail-closed detection, resolution, agent identity, primary names, and durable provisioning jobs on Sepolia",
-  "author": "estmcmxci \ud835\udd2a\u2736 (https://estmcmxci.co)",
+  "author": "estmcmxci 𝔪✶ (https://estmcmxci.co)",
   "license": "MIT",
   "homepage": "https://github.com/estmcmxci/mm-plugin-ensv2#readme",
   "repository": {
@@ -328,6 +328,18 @@
         ],
         "dataAccess": [
           "accounts",
+          "network"
+        ],
+        "targetChains": [
+          11155111
+        ]
+      },
+      {
+        "id": "ensv2:jobs:abandon",
+        "capabilities": [
+          "wallet-read"
+        ],
+        "dataAccess": [
           "network"
         ],
         "targetChains": [

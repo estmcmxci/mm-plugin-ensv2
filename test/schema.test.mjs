@@ -68,3 +68,16 @@ for (const fx of invalid) {
     assert.equal(r.ok, false, "expected rejection but it validated");
   });
 }
+
+// Finding 6: additionalProperties:false must reject keys that exist on Object.prototype.
+for (const key of ["constructor", "toString", "hasOwnProperty", "__proto__"]) {
+  test(`additionalProperties:false rejects an own property named "${key}"`, () => {
+    const base = readJson(join(SCHEMA_DIR, "fixtures", "valid", "errors.deployment-drift.json"));
+    assert.ok(validateSchema(SCHEMA_IDS.errors, base).ok);
+    const poisoned = JSON.parse(`${JSON.stringify(base).slice(0, -1)},${JSON.stringify(key)}:1}`);
+    assert.ok(Object.prototype.hasOwnProperty.call(poisoned, key), "the fixture carries the key as an own property");
+    const r = validateSchema(SCHEMA_IDS.errors, poisoned);
+    assert.equal(r.ok, false, `${key} slipped through additionalProperties:false`);
+    assert.ok(r.errors.some((e) => e.includes(`unexpected property "${key}"`)), r.errors.join("; "));
+  });
+}

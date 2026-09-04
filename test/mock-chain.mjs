@@ -91,10 +91,10 @@ export class MockChain {
     return { owner, deployer: owner, factory: this.d.resolverFactory, implementation: this.d.resolverImplementation, proxyLogic: this.d.resolverProxyLogic, proxyLogicMatchesConfig: true, predicted, salt: `0x${"0".repeat(64)}`, outerSalt: `0x${"0".repeat(64)}`, deployed: !!r, verified: r ? r.verified : null };
   }
   async available(label) {
-    return { label, name: `${label}.eth`, available: !this.entry(label), minRegisterDuration: this.minDuration, minCommitmentAge: this.minAge, maxCommitmentAge: this.maxAge };
+    return { label, name: `${label}.eth`, available: !this.entry(label) && !this.reserved?.has(label), minRegisterDuration: this.minDuration, minCommitmentAge: this.minAge, maxCommitmentAge: this.maxAge };
   }
   async quote(label, duration) {
-    if (this.entry(label)) throw new Error(`NameNotAvailable(${label})`);
+    if (this.entry(label) || this.reserved?.has(label)) throw new Error(`NameNotAvailable(${label})`);
     const total = this.price;
     return { label, name: `${label}.eth`, durationSeconds: Number(duration), durationYears: Number(duration) / 31536000, paymentToken: { address: this.d.paymentToken, symbol: "USDC", decimals: 6 }, base: total.toString(), premium: "0", total: total.toString(), formatted: { base: (Number(total) / 1e6).toFixed(6), premium: "0", total: (Number(total) / 1e6).toFixed(6) }, minRegisterDuration: this.minDuration };
   }
@@ -116,7 +116,7 @@ export class MockChain {
       name,
       label,
       registry: this.d.registry,
-      status: n ? "REGISTERED" : "AVAILABLE",
+      status: n ? "REGISTERED" : this.reserved?.has(label) ? "RESERVED" : "AVAILABLE",
       expiry,
       expiresAt: expiry ? new Date(expiry * 1000).toISOString() : null,
       owner: n ? n.owner : null,
@@ -215,7 +215,7 @@ export class MockChain {
     }
     this.block += 1n;
     this.time += 12;
-    this.applied.push({ to: calldata.to, fn, from, status });
+    this.applied.push({ to: calldata.to, fn, from, status, hash });
     this.receipts.set(hash, { status, blockNumber: this.block, blockHash: keccak256(hash), from, to: calldata.to, gasUsed: 100000n, effectiveGasPrice: 1n, logs });
     return { hash, status };
   }
@@ -250,7 +250,7 @@ export class MockChain {
         if (!t0) throw new Error("CommitmentTooNew(unknown)");
         if (this.time < t0 + this.minAge) throw new Error("CommitmentTooNew");
         if (this.time >= t0 + this.maxAge) throw new Error("CommitmentTooOld");
-        if (this.entry(label)) throw new Error("NameNotAvailable");
+        if (this.entry(label) || this.reserved?.has(label)) throw new Error("NameNotAvailable");
         if (Number(duration) < this.minDuration) throw new Error("DurationTooShort");
         if (!isAddressEqual(token, d.paymentToken)) throw new Error("bad payment token");
         const bal = this.balances.get(from.toLowerCase()) ?? 0n;
@@ -322,11 +322,34 @@ export function secondEndpoint(chain, lie) {
   });
 }
 
+/** The host's CommandError as the plugin sees it: code, hint, and the terminal reason in failureReason. */
+export class HostCommandError extends Error {
+  constructor(code, message, hint, failureReason) {
+    super(message);
+    this.name = "CommandError";
+    this.code = code;
+    this.hint = hint;
+    if (failureReason) this.failureReason = failureReason;
+  }
+}
+
 /**
- * The wallet executor. `killAfter` freezes the process right after the
- * transaction landed (the receipt exists, the job file was never updated);
- * `killBefore` freezes it before anything was broadcast; `throwAfter` lets the
- * transaction land and then throws, which is the live network-drop case.
+ * The wallet executor, modelling @metamask/agent-wallet 6.2.0's real contract
+ * (dist/chunks/cliWalletExecutor-*.js, fox-sdk TX_JOB_STATUS):
+ *
+ *   returns  { hash, status: CONFIRMED, walletJobId }                              on success
+ *   returns  { status: BROADCAST_TRACKING_EXPIRED | CONFIRMATION_TRACKING_EXPIRED }  (no hash) when the server stopped tracking
+ *   throws   CommandError TX_DENIED   (failureReason DENIED)                      before anything is signed
+ *   throws   CommandError TX_EXPIRED  (failureReason EXPIRED)                     before anything is signed
+ *   throws   TX_REVERTED "Transaction 0x… reverted on chain 11155111."            after waitForEvmReceipt saw a revert
+ *   throws   a plain Error with `pendingJob: { pollingId }` attached              when polling fails after submit
+ *
+ * Test hooks (each names a step): killBefore / killAfter freeze the process;
+ * throwAfter is a network drop after the transaction landed; deny / expire
+ * refuse before broadcast; trackingExpired lets the transaction land and
+ * returns the tracking timeout; trackingExpiredLost returns it without the
+ * transaction ever landing; pollTimeout lands the transaction and throws with
+ * the pending job attached.
  */
 export function mockExecutor(chain, owner, opts = {}) {
   const calls = [];
@@ -334,17 +357,25 @@ export function mockExecutor(chain, owner, opts = {}) {
   const reachedPromise = new Promise((r) => (reached = r));
   const submit = async (req) => {
     calls.push(req.step);
-    if (opts.killBefore === req.step) {
+    const walletJobId = `wjob-${calls.length}`;
+    const is = (k) => opts[k] === req.step;
+    if (is("killBefore")) {
       reached();
       return new Promise(() => {});
     }
+    if (is("deny")) throw new HostCommandError("TX_DENIED", "The approval was denied.", "The approval was denied on the paired device / registered email.", "DENIED");
+    if (is("expire")) throw new HostCommandError("TX_EXPIRED", "Transaction job ended in status EXPIRED.", "The approval or tracking window expired. Re-run the command to submit again.", "EXPIRED");
+    if (is("trackingExpiredLost")) return { status: "BROADCAST_TRACKING_EXPIRED", walletJobId };
     const { hash, status } = chain.apply(owner, req.calldata);
-    if (opts.killAfter === req.step) {
+    if (is("killAfter")) {
       reached();
       return new Promise(() => {});
     }
-    if (opts.throwAfter === req.step) throw new Error("Remote signing request failed (network error)");
-    return { hash, status: status === "success" ? "CONFIRMED" : "FAILED", ...(status === "reverted" ? { failureCode: "rpc_reverted", failureDescription: "execution reverted" } : {}), walletJobId: `wjob-${calls.length}` };
+    if (is("throwAfter")) throw new Error("Remote signing request failed (network error)");
+    if (is("trackingExpired")) return { status: "CONFIRMATION_TRACKING_EXPIRED", walletJobId };
+    if (is("pollTimeout")) throw Object.assign(new Error("pollUntilTerminal aborted"), { pendingJob: { pollingId: walletJobId, kind: "evm.transaction", namespace: "eip155", submittedAt: new Date(chain.time * 1000).toISOString() } });
+    if (status === "reverted") throw new HostCommandError("TX_REVERTED", `Transaction ${hash} reverted on chain 11155111.`, "Inspect the transaction on the block explorer; funds may have been spent on gas.", "rpc_reverted");
+    return { hash, status: "CONFIRMED", walletJobId };
   };
   return { submit, calls, reached: reachedPromise };
 }

@@ -197,6 +197,25 @@ export function buildIntent(b: BuildIntentInput): ProvisioningIntent {
   return { ...base, idempotencyKey: digest, eip712: { primaryType: "ProvisioningIntent", domainName: DOMAIN_NAME, domainVersion: DOMAIN_VERSION, intentHash: digest } };
 }
 
+/**
+ * The same intent with a higher spend ceiling. Everything else is untouched;
+ * the digest, idempotencyKey and eip712.intentHash are recomputed because
+ * maxTotalAmount is in the signed projection. Lowering is refused: a ceiling
+ * only ever protects the user, and a lower one would be enforced anyway by
+ * the live price check.
+ */
+export function withMaxSpend(i: ProvisioningIntent, maxTotalAmount: bigint): ProvisioningIntent {
+  if (maxTotalAmount < BigInt(i.maxSpend.maxTotalAmount)) throw new Error("withMaxSpend: the ceiling can be raised, not lowered");
+  const base: Omit<ProvisioningIntent, "idempotencyKey" | "eip712"> = {
+    ...i,
+    maxSpend: { ...i.maxSpend, maxTotalAmount: maxTotalAmount.toString(), maxRegistrationAmount: maxTotalAmount.toString() },
+  };
+  delete (base as Partial<ProvisioningIntent>).idempotencyKey;
+  delete (base as Partial<ProvisioningIntent>).eip712;
+  const digest = intentDigest(base);
+  return { ...base, idempotencyKey: digest, eip712: { primaryType: "ProvisioningIntent", domainName: DOMAIN_NAME, domainVersion: DOMAIN_VERSION, intentHash: digest } };
+}
+
 /** Recompute the hashes an intent claims and confirm they match. A stored intent is never trusted on its own word. */
 export function intentIsConsistent(i: ProvisioningIntent): boolean {
   if (configHash(i.resolverConfig) !== i.resolverConfigHash) return false;

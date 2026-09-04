@@ -35,8 +35,10 @@ import { agentIdFromReceipt } from "./agent.js";
 import type { ProvisionChain, ReceiptLite } from "./chain.js";
 import type { EnsV2Deployment } from "./deployments.js";
 import { ensip25Key } from "./erc7930.js";
-import { buildIntent, intentIsConsistent, jobIdFor, type BuildIntentInput, type IntentRecord, type ProvisioningIntent } from "./intent.js";
+import { classifyReturned, classifyThrown, type SubmitOutcome, type SubmitResult } from "./executor.js";
+import { buildIntent, intentIsConsistent, jobIdFor, withMaxSpend, type BuildIntentInput, type IntentRecord, type ProvisioningIntent } from "./intent.js";
 import {
+  ConcurrentModificationError,
   JOB_FILE_FORMAT,
   TERMINAL_STATES,
   commitmentSecretRef,
@@ -68,7 +70,7 @@ import { encodeFunctionData } from "viem";
 // Dependencies
 
 export type SubmitRequest = { step: ReceiptStepName; calldata: Calldata; summary: string; details: Record<string, string> };
-export type SubmitResult = { hash?: Hex; status: string; failureCode?: string; failureDescription?: string; walletJobId?: string };
+export type { SubmitResult } from "./executor.js";
 /** Hands unsigned calldata to the wallet. In the plugin this wraps ctx.walletExecutor; it never sees a key. */
 export type Submit = (req: SubmitRequest) => Promise<SubmitResult>;
 
@@ -89,6 +91,8 @@ export type EngineDeps = {
 export type RunOptions = {
   /** The user has confirmed that a step recorded as submitted never landed and is not pending. Lets the engine send it again. */
   resubmitUnconfirmed?: boolean;
+  /** Raise the job's spend ceiling (payment-token units) before running. Lowering is ignored with a warning. */
+  raiseCeilingTo?: bigint;
 };
 
 /** Thrown by the engine when a job halts. `error` is a schema-valid program error; the job file has already been persisted. */
@@ -147,11 +151,16 @@ export type Plan =
   | { kind: "existing"; file: JobFile; inputsMatch: boolean; conflict?: ProgramError }
   | { kind: "new"; file: JobFile; quoteTotal: bigint; alreadyRegistered: boolean };
 
-/** Find jobs for (chain, name, owner). Non-terminal first, newest first. */
-export async function jobsFor(store: JobStore, chainId: number, normalizedName: string, owner: Address): Promise<JobFile[]> {
+/**
+ * Jobs for (chain, name, owner), newest first. By default only jobs that can
+ * still run: a completed or terminal job is a record, not a claim on the name,
+ * and must not block a new job for it (the same inputs are found by id anyway).
+ */
+export async function jobsFor(store: JobStore, chainId: number, normalizedName: string, owner: Address, opts: { includeTerminal?: boolean } = {}): Promise<JobFile[]> {
   const all = await store.list();
   return all
     .filter((f) => f.job.chain === `eip155:${chainId}` && f.job.facts.normalizedName === normalizedName && isAddressEqual(f.job.facts.owner, owner))
+    .filter((f) => opts.includeTerminal || !TERMINAL_STATES.has(f.job.state))
     .sort((a, b) => {
       const ta = TERMINAL_STATES.has(a.job.state) ? 1 : 0;
       const tb = TERMINAL_STATES.has(b.job.state) ? 1 : 0;
@@ -207,9 +216,6 @@ async function planProvisionInner(deps: Pick<EngineDeps, "chain" | "deployment" 
     halt({ code: "E_NAME_INVALID", category: "validation", retryability: "terminal", message: e instanceof Error ? e.message : String(e), recoveryAction: { kind: "none", description: "Pass a registrable <label>.eth name of at least 3 characters." } }, "terminal_failed");
   }
   const normalized = `${label}.eth`;
-
-  // 1. Is there already a job for (chain, name, owner)?
-  const existing = await jobsFor(deps.store, chainId, normalized, owner);
 
   // 2. Facts every intent needs, all deterministic in the inputs.
   const res = await deps.chain.resolverStatus(owner);
@@ -282,11 +288,24 @@ async function planProvisionInner(deps: Pick<EngineDeps, "chain" | "deployment" 
     maxSpend: { asset: d.paymentToken, maxTotalAmount: maxSpend },
   });
 
-  // 4. Existing job: resume it, or refuse to start a second one for different inputs.
+  // 4. Existing job. Exactly these inputs → the job with this id, whatever its state (completed is a no-op,
+  //    terminal_failed is reported as such by runJob). Otherwise an ACTIVE job for the name is resumed when the
+  //    user-controlled inputs match (the ceiling may differ), or refused when they do not. Completed and terminal
+  //    jobs never block a new job for the name.
+  const jobId = jobIdFor(chainId, normalized, owner, intent.eip712.intentHash);
+  const byId = await deps.store.get(jobId);
+  if (byId) return { kind: "existing", file: byId, inputsMatch: true };
+  // The ceiling is not a user input, and a completed name quotes a zero ceiling, so the id can miss while the
+  // job is the same: an ACTIVE job with these inputs is resumed, a COMPLETED one is the no-op. Only a
+  // terminal_failed record is skipped here; it never blocks a fresh attempt.
+  const inputs = userInputsOf(intent);
+  const all = await jobsFor(deps.store, chainId, normalized, owner, { includeTerminal: true });
+  const sameInputs = all.filter((f) => userInputsOf(f.intent) === inputs);
+  const active = sameInputs.find((f) => !TERMINAL_STATES.has(f.job.state)) ?? sameInputs.find((f) => f.job.state === "completed");
+  if (active) return { kind: "existing", file: active, inputsMatch: true };
+  const existing = all.filter((f) => !TERMINAL_STATES.has(f.job.state));
   if (existing.length) {
     const file = existing[0]!;
-    const inputsMatch = userInputsOf(file.intent) === userInputsOf(intent);
-    if (inputsMatch) return { kind: "existing", file, inputsMatch: true };
     const conflict = programError({
       code: "E_IDEMPOTENCY_CONFLICT",
       category: "validation",
@@ -307,7 +326,6 @@ async function planProvisionInner(deps: Pick<EngineDeps, "chain" | "deployment" 
   }
 
   // 6. The job. The commitment tuple is fixed now so the commitment hash is durable before anything is sent.
-  const jobId = jobIdFor(chainId, normalized, owner, intent.eip712.intentHash);
   const commitment: PrivateCommitment = {
     label,
     owner,
@@ -352,7 +370,7 @@ async function planProvisionInner(deps: Pick<EngineDeps, "chain" | "deployment" 
     outcome: { ens: "pending", identity: intent.identity === "erc8004" ? "pending" : "not_requested", payment: "not_required" },
     resume: { resumable: true, resumeFromStep: "canonicality_check", nextAction: "Run the job.", requiresPayment: !alreadyRegistered },
   };
-  const file: JobFile = { format: JOB_FILE_FORMAT, intent, job, private: { commitment } };
+  const file: JobFile = { format: JOB_FILE_FORMAT, revision: 0, intent, job, private: { commitment } };
   return { kind: "new", file, quoteTotal, alreadyRegistered };
 }
 
@@ -482,7 +500,7 @@ class Runtime {
       const from = next === "identity_bind" ? "identity_preflight" : next;
       job.resume = { ...(job.resume ?? { resumable: true }), resumable: true, ...(from ? { resumeFromStep: from } : {}), nextAction: from ? `Resume at ${from}.` : "Run the final verification.", requiresPayment: !registered };
     }
-    await this.deps.store.put(this.file);
+    await this.deps.store.update(this.file);
   }
 
   setState(state: JobState): void {
@@ -581,11 +599,57 @@ class Runtime {
   // -- the transaction-step protocol --
 
   async txStep(name: ReceiptStepName, spec: TxSpec): Promise<void> {
+    await this.guard(name, () => this.txStepInner(name, spec));
+  }
+
+  /**
+   * Run one step. A Halt is recorded on the step and the job; any other error
+   * (RPC failure, ReadError, bug) is recorded too, as retryable, so a run
+   * never dies without leaving a record of where it stopped. A concurrent
+   * modification of the job file stops the run WITHOUT writing.
+   */
+  async guard(name: StepName, body: () => Promise<void>): Promise<void> {
+    if (this.deps.signal?.aborted) throw new Error("aborted");
     try {
-      await this.txStepInner(name, spec);
+      await body();
     } catch (e) {
-      if (e instanceof Halt) await this.fail(name, e);
-      throw e;
+      if (e instanceof ProvisionHalt) throw e;
+      try {
+        if (e instanceof ConcurrentModificationError) throw e;
+        if (e instanceof Halt) await this.fail(name, e);
+        const msg = e instanceof Error ? e.message.split("\n")[0]! : String(e);
+        const isRead = e instanceof ReadError;
+        await this.fail(
+          name,
+          new Halt(
+            {
+              code: isRead ? "E_VERIFICATION_MISMATCH" : "E_INTERNAL",
+              category: isRead ? "ens" : "internal",
+              retryability: "retryable",
+              message: `${name}: ${msg}`,
+              recoveryAction: { kind: "resume_job", description: "Nothing was sent by this step. Fix the cause (RPC, inputs) and run the job again." },
+            },
+            "retryable_failed",
+            name === "identity_bind" ? "identity_preflight" : (name as Exclude<StepName, "identity_bind">),
+          ),
+        );
+      } catch (inner) {
+        if (inner instanceof ConcurrentModificationError) {
+          throw new ProvisionHalt(
+            programError({
+              code: "E_IDEMPOTENCY_CONFLICT",
+              category: "validation",
+              retryability: "requires_user_action",
+              message: `Job ${this.job.jobId}: ${inner.message}. This run stopped without writing anything; another process is running this job.`,
+              step: name,
+              recoveryAction: { kind: "inspect_job_status", description: `Let the other run finish, then \`mm ensv2 jobs show ${this.job.jobId}\`. Never run two provisioning processes for one name at once.` },
+              evidence: { jobId: this.job.jobId, intentHash: this.job.intentHash },
+            }),
+            this.file,
+          );
+        }
+        throw inner;
+      }
     }
   }
 
@@ -714,48 +778,64 @@ class Runtime {
     await this.save();
     this.progress(built.summary);
 
-    let result: SubmitResult;
+    // What the wallet tells us is classified in executor.ts against the host's real contract: the executor RETURNS
+    // confirmed results and the server-side tracking timeouts (possibly without a hash), THROWS for denied / expired /
+    // failed / reverted, and attaches the pending job (pollingId) to polling failures.
+    let outcome: SubmitOutcome;
     try {
-      result = await this.deps.submit({ step: name, calldata: built.calldata, summary: built.summary, details: built.details });
+      outcome = classifyReturned(await this.deps.submit({ step: name, calldata: built.calldata, summary: built.summary, details: built.details }));
     } catch (e) {
-      const msg = e instanceof Error ? e.message.split("\n")[0]! : String(e);
-      // The wallet may have broadcast before failing (a network drop after submit is the recorded live case). Unknown, so halt.
-      this.indeterminate(name, spec, `${name}: the wallet request failed with "${msg}" after the transaction may already have been submitted.`);
+      outcome = classifyThrown(e);
+    }
+    if ("walletJobId" in outcome && outcome.walletJobId) {
+      // The wallet's job handle survives a restart: `mm wallet requests watch <pollingId>`.
+      job.facts.executionPlane = { kind: "metamask-agent-wallet", ref: outcome.walletJobId };
+      await this.save();
     }
 
-    if (!result.hash) {
-      // Nothing was broadcast: the host reports a failure before a hash existed.
-      const code = /polic|denied/i.test(result.failureCode ?? "") ? "E_POLICY_DENIED" : /mfa|expired|reject/i.test(`${result.failureCode} ${result.status}`) ? "E_MFA_REQUIRED" : "E_INTERNAL";
+    if (outcome.kind === "not_broadcast") {
+      // The only two outcomes the host reports BEFORE signing. Nothing reached the chain; the next run may try again without a flag.
       s.state = "failed";
       halt(
         {
-          code,
-          category: code === "E_INTERNAL" ? "internal" : "policy",
-          retryability: code === "E_INTERNAL" ? "retryable" : "requires_user_action",
-          message: `${name}: the wallet did not broadcast the transaction (${result.failureDescription ?? result.failureCode ?? result.status}).`,
+          code: outcome.code,
+          category: "policy",
+          retryability: "requires_user_action",
+          message: `${name}: the wallet did not broadcast the transaction — ${outcome.reason}.`,
           source: "wallet",
-          recoveryAction: { kind: "resume_job", description: "Nothing was sent. Address the cause (approve the request, adjust policy) and run the job again.", resumeFrom: spec.resumeFrom },
+          recoveryAction: { kind: "resume_job", description: "Nothing was sent. Approve the request (or adjust the wallet policy) and run the job again; the step will be attempted once more.", resumeFrom: spec.resumeFrom },
         },
         "retryable_failed",
         spec.resumeFrom,
       );
     }
 
-    const rec = this.receiptRecord(name, result.hash, s.attempts!, result.walletJobId);
+    if (outcome.kind === "unknown") {
+      // Includes BROADCAST_TRACKING_EXPIRED / CONFIRMATION_TRACKING_EXPIRED, network drops after submit, and anything
+      // unrecognised. The step stays in_progress; the chain decides on the next run.
+      const watch = outcome.walletJobId ? ` The wallet job is ${outcome.walletJobId}: \`mm wallet requests watch ${outcome.walletJobId}\` shows whether it was signed and broadcast.` : "";
+      this.indeterminate(name, spec, `${name}: the wallet request ended without a confirmed outcome — ${outcome.reason}. The transaction may still land.${watch}`);
+    }
+
+    const hash = outcome.hash;
+    const rec = this.receiptRecord(name, hash, s.attempts!, "walletJobId" in outcome ? outcome.walletJobId : undefined);
     s.receipts = [...(s.receipts ?? []), rec];
-    if (result.walletJobId) job.facts.executionPlane = { kind: "metamask-agent-wallet", ref: result.walletJobId };
     await this.save();
 
-    const r = await this.readReceiptWithPatience(result.hash);
-    if (!r) this.indeterminate(name, spec, `${name}: transaction ${result.hash} was submitted but its receipt could not be read.`, [result.hash]);
+    const r = await this.readReceiptWithPatience(hash);
+    if (!r) this.indeterminate(name, spec, `${name}: transaction ${hash} was submitted but its receipt could not be read yet${outcome.kind === "reverted_hash" ? ` (the wallet reported: ${outcome.reason})` : ""}.`, [hash]);
     this.fillReceipt(rec, r);
     await this.save();
     if (r.status === "reverted") {
       s.state = "failed";
-      this.revertHalt(name, spec, result.hash);
+      this.revertHalt(name, spec, hash);
+    }
+    if (outcome.kind === "reverted_hash") {
+      // The wallet said reverted but the receipt says success: the chain wins, but say so.
+      this.log("warn", `${name}: the wallet reported "${outcome.reason}" yet the receipt for ${hash} is success; continuing on the receipt.`);
     }
     await spec.confirm(r);
-    await this.markStep(name, "succeeded", `tx ${result.hash}`);
+    await this.markStep(name, "succeeded", `tx ${hash}`);
   }
 }
 
@@ -771,7 +851,14 @@ export async function runJob(deps: EngineDeps, file: JobFile, opts: RunOptions =
   if (file.job.state === "terminal_failed" || file.job.state === "cancelled" || file.job.state === "expired") {
     const blocked = file.job.resume?.blockedBy;
     throw new ProvisionHalt(
-      programError({ code: "E_JOB_TERMINAL", category: "validation", retryability: "terminal", message: `Job ${file.job.jobId} is ${file.job.state}${blocked ? `: ${blocked.message}` : ""}.`, recoveryAction: { kind: "abandon_job", description: blocked?.recoveryAction.description ?? "Start a new job." } }),
+      programError({
+        code: "E_JOB_TERMINAL",
+        category: "validation",
+        retryability: "terminal",
+        message: `Job ${file.job.jobId} is ${file.job.state}${blocked ? `: ${blocked.message}` : ""}.`,
+        recoveryAction: { kind: "abandon_job", description: `${blocked ? `${blocked.recoveryAction.description} ` : ""}To start over for this name, set this record aside with \`mm ensv2 jobs abandon ${file.job.jobId}\` and run provision again; the record is kept.` },
+        evidence: { jobId: file.job.jobId, intentHash: file.job.intentHash },
+      }),
       file,
     );
   }
@@ -779,7 +866,7 @@ export async function runJob(deps: EngineDeps, file: JobFile, opts: RunOptions =
   const { chain } = deps;
   const d = deps.deployment;
   const job = file.job;
-  const intent = file.intent;
+  let intent = file.intent;
 
   // A previous halt is cleared when the run restarts; the step's own record still shows the failure.
   if (job.resume?.blockedBy) {
@@ -788,31 +875,22 @@ export async function runJob(deps: EngineDeps, file: JobFile, opts: RunOptions =
   }
   if (job.state === "retryable_failed") rt.setState(job.facts.erc8004AgentId ? "identity_bound" : job.outcome?.ens === "succeeded" ? "ens_registered" : "accepted");
 
-  const run = async (name: StepName, body: () => Promise<void>): Promise<void> => {
-    if (deps.signal?.aborted) throw new Error("aborted");
-    try {
-      await body();
-    } catch (e) {
-      if (e instanceof Halt) await rt.fail(name, e);
-      if (e instanceof ProvisionHalt) throw e;
-      const msg = e instanceof Error ? e.message.split("\n")[0]! : String(e);
-      const isRead = e instanceof ReadError;
-      await rt.fail(
-        name,
-        new Halt(
-          {
-            code: isRead ? "E_VERIFICATION_MISMATCH" : "E_INTERNAL",
-            category: isRead ? "ens" : "internal",
-            retryability: "retryable",
-            message: `${name}: ${msg}`,
-            recoveryAction: { kind: "resume_job", description: "Nothing was sent by this step. Fix the cause (RPC, inputs) and run the job again." },
-          },
-          "retryable_failed",
-          name === "identity_bind" ? "identity_preflight" : (name as Exclude<StepName, "identity_bind">),
-        ),
-      );
+  // Raising the ceiling is the one intent change a resume may make: the price moved and the user said so explicitly.
+  if (opts.raiseCeilingTo !== undefined) {
+    const current = BigInt(intent.maxSpend.maxTotalAmount);
+    if (opts.raiseCeilingTo <= current) {
+      rt.log("warn", `--max-spend ${opts.raiseCeilingTo} does not raise the job's ceiling of ${current}; keeping ${current}.`);
+    } else {
+      intent = withMaxSpend(intent, opts.raiseCeilingTo);
+      file.intent = intent;
+      job.intentHash = intent.eip712.intentHash;
+      job.idempotencyKey = intent.idempotencyKey;
+      rt.log("warn", `Job ${job.jobId}: spend ceiling raised from ${current} to ${opts.raiseCeilingTo} payment-token units; intent hash is now ${intent.eip712.intentHash}.`);
+      await rt.save();
     }
-  };
+  }
+
+  const run = (name: StepName, body: () => Promise<void>): Promise<void> => rt.guard(name, body);
 
   // Every step runs on every invocation. A step that already succeeded is
   // re-observed (reads only) and confirmed still done; that is what lets a
@@ -980,11 +1058,12 @@ export async function runJob(deps: EngineDeps, file: JobFile, opts: RunOptions =
             return;
           }
           const c = rt.commitment;
-          const [avail, q, funds] = await Promise.all([chain.available(c.label), chain.quote(c.label, BigInt(c.durationSeconds)), chain.tokenState(rt.owner)]);
-          if (!avail.available) halt({ code: "E_NAME_UNAVAILABLE", category: "ens", retryability: "terminal", message: `${rt.name} is no longer available.`, recoveryAction: { kind: "abandon_job", description: "Check `mm ensv2 whois`. Nothing was paid." } }, "terminal_failed");
+          const avail = await chain.available(c.label);
+          if (!avail.available) halt({ code: "E_NAME_UNAVAILABLE", category: "ens", retryability: "terminal", message: `${rt.name} is no longer available (registered by someone else, in its grace period, or RESERVED).`, recoveryAction: { kind: "abandon_job", description: "Check `mm ensv2 whois`. Nothing was paid." } }, "terminal_failed");
+          const [q, funds] = await Promise.all([chain.quote(c.label, BigInt(c.durationSeconds)), chain.tokenState(rt.owner)]);
           const total = BigInt(q.total);
           const ceiling = BigInt(intent.maxSpend.maxTotalAmount);
-          if (total > ceiling) halt({ code: "E_PRICE_EXCEEDS_MAX_SPEND", category: "funding", retryability: "requires_user_action", message: `The registrar now quotes ${q.formatted.total} ${q.paymentToken.symbol} (${total} units); the intent's ceiling is ${ceiling} units.`, recoveryAction: { kind: "refresh_quote_and_resume", description: "Start a new job with a higher --max-spend. This job will not pay above its ceiling." } }, "retryable_failed", "price_recheck");
+          if (total > ceiling) halt({ code: "E_PRICE_EXCEEDS_MAX_SPEND", category: "funding", retryability: "requires_user_action", message: `The registrar now quotes ${q.formatted.total} ${q.paymentToken.symbol} (${total} units); the intent's ceiling is ${ceiling} units.`, recoveryAction: { kind: "refresh_quote_and_resume", description: `Re-run with --max-spend ${q.formatted.total} (or more) to raise this job's ceiling; it will not pay above the ceiling it has.` } }, "retryable_failed", "price_recheck");
           if (funds.balance < total) halt({ code: "E_INSUFFICIENT_FUNDS", category: "funding", retryability: "requires_user_action", message: `Registration costs ${q.formatted.total} ${q.paymentToken.symbol}; this wallet holds ${funds.balance} units.`, recoveryAction: { kind: "fund_wallet_and_resume", description: "On Sepolia, run `mm ensv2 faucet`, then run the job again." } }, "retryable_failed", "price_recheck");
           if (funds.allowance < total) halt({ code: "E_INSUFFICIENT_ALLOWANCE", category: "funding", retryability: "retryable", message: `The registrar's allowance is ${funds.allowance} units; ${total} are needed.`, recoveryAction: { kind: "grant_allowance_and_resume", description: "Run the job again; payment_token_approve will be re-observed.", resumeFrom: "payment_token_approve" } }, "retryable_failed", "payment_token_approve");
           await rt.markStep(name, "succeeded", `${q.formatted.total} ${q.paymentToken.symbol} ≤ ceiling ${ceiling}`);

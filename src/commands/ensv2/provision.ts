@@ -192,7 +192,7 @@ export default class EnsV2Provision extends PluginCommand<ProvisionResult | Prov
         const legacy = getPending(chainId, label);
         const adopted = !!legacy && isAddressEqual(legacy.owner, owner) && adoptLegacyCommitment(plan.file, legacy);
         if (adopted) io.log("info", `Adopted the pending registration checkpoint for ${name} into job ${plan.file.job.jobId}.`);
-        await store.put(plan.file);
+        await store.create(plan.file); // exclusive: a concurrent run for the same name fails here instead of overwriting the secret
         if (adopted) clearPending(chainId, label);
         io.log("info", `Created job ${plan.file.job.jobId} at ${store.location(plan.file.job.jobId)}`);
       } else {
@@ -201,7 +201,8 @@ export default class EnsV2Provision extends PluginCommand<ProvisionResult | Prov
 
       // ---- run
       const deps = await engineDeps({ ctx: this.ctx, io, commandId: "ensv2:provision", client, deployment: d, store, verifyRpc: v.verifyRpc });
-      const file = await runJob(deps, plan.file, { resubmitUnconfirmed: v.resubmitUnconfirmed });
+      // An explicit --max-spend on a resume raises the existing job's ceiling (the one intent change a resume may make).
+      const file = await runJob(deps, plan.file, { resubmitUnconfirmed: v.resubmitUnconfirmed, ...(plan.kind === "existing" && maxSpend !== undefined ? { raiseCeilingTo: maxSpend } : {}) });
       return toResult(file.job, plan.kind === "existing", summarize(file, store));
     } catch (error) {
       throw jobErrorToCommandError(error, store);
