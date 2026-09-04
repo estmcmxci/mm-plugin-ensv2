@@ -67,6 +67,32 @@ export const erc20Abi = parseAbi([
 ]);
 
 /**
+ * Adapter8004 (unruggable-labs/adapter). Every selector below was confirmed
+ * present in the live Sepolia implementation bytecode (0x31a68E5b…) on
+ * 2026-09-03. The pinned source declares further `register` overloads that
+ * were NOT confirmed live and are deliberately omitted.
+ */
+export const adapter8004Abi = parseAbi([
+  "function register(uint8 standard, address tokenContract, uint256 tokenId, string agentURI) external returns (uint256 agentId)",
+  "function bindingOf(uint256 agentId) external view returns ((uint8 standard, address tokenContract, uint256 tokenId))",
+  "function identityRegistry() external view returns (address)",
+  "function isController(uint256 agentId, address account) external view returns (bool)",
+  "function ownerOf(uint256 agentId) external view returns (address)",
+  "function tokenURI(uint256 agentId) external view returns (string)",
+  "event AgentBound(uint256 indexed agentId, uint8 indexed standard, address indexed tokenContract, uint256 tokenId, address registeredBy)",
+]);
+
+/** IERCAgentBindings.TokenStandard. The ENSv2 registry is an ERC-1155 singleton that exposes ownerOf(), so ERC721 is the standard that works for it. */
+export const TOKEN_STANDARD = { ERC721: 0, ERC1155: 1, ERC6909: 2, ERC1155F: 3, ERC6909F: 4 } as const;
+
+/** ERC-8004 IdentityRegistry — ERC-721 subset used for reads. */
+export const identityRegistryAbi = parseAbi([
+  "function ownerOf(uint256 tokenId) external view returns (address)",
+  "function tokenURI(uint256 tokenId) external view returns (string)",
+  "function balanceOf(address owner) external view returns (uint256)",
+]);
+
+/**
  * PermissionedResolver — the DEPLOYED generation. Three-argument initializer,
  * selector 0x7058b559, confirmed by bytecode presence on
  * 0x9EAe5C2730a7dD16BDD1DeE6421a1B91e3B0365e (2026-09-03). The two-argument

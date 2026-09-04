@@ -14,6 +14,9 @@ import { SEPOLIA } from "../dist/lib/deployments.js";
 import { detectEnsV2, selfCheck } from "../dist/lib/ensv2.js";
 import { resolveQuery, resolverInfo, whois } from "../dist/lib/reads.js";
 import { buildDeployPlan, ownedResolverStatus } from "../dist/lib/resolver.js";
+import { agentInfo, bindPlan, findAgentIdsForName } from "../dist/lib/agent.js";
+import { decodeFunctionResult } from "viem";
+import { adapter8004Abi } from "../dist/lib/abis.js";
 import {
   ZERO_ADDRESS, ZERO_REFERRER, buildApprove, buildCommit, buildRegister, checkAvailable, computeCommitment,
   makeSecret, quoteRegistration, tokenState, yearsToSeconds,
@@ -90,6 +93,29 @@ try {
         commitment, commitSimulation: commitSim,
         calldata: { approve: { to: approve.to, selector: approve.data.slice(0, 10), bytes: (approve.data.length - 2) / 2 }, commit: { to: commit.to, selector: commit.data.slice(0, 10), bytes: (commit.data.length - 2) / 2 }, register: { to: register.to, selector: register.data.slice(0, 10), bytes: (register.data.length - 2) / 2 } },
       });
+      break;
+    }
+    case "agent-plan": {
+      // npm run check -- agent-plan <name> <owner> <agentURI>
+      // Preconditions + calldata, then eth_call the REAL adapter.register from the owner: returns the agentId it would mint.
+      const d = await gate();
+      const owner = need(process.argv[4], "owner-address");
+      const plan = await bindPlan(client, d, need(arg, "name"), owner, need(process.argv[5], "agentURI"));
+      let sim;
+      try {
+        const { data } = await client.call({ account: owner, to: plan.calldata.to, data: plan.calldata.data });
+        sim = { ok: true, wouldMintAgentId: decodeFunctionResult({ abi: adapter8004Abi, functionName: "register", data }).toString() };
+      } catch (e) { sim = { ok: false, reverted: e.shortMessage ?? e.message }; }
+      show({ name: plan.name, owner, tokenContract: plan.tokenContract, tokenId: "0x" + plan.tokenId.toString(16), standard: plan.standard, agentURI: plan.agentURI,
+             calldata: { to: plan.calldata.to, selector: plan.calldata.data.slice(0, 10), bytes: (plan.calldata.data.length - 2) / 2 }, simulation: sim });
+      break;
+    }
+    case "agent-info": {
+      // npm run check -- agent-info <name> [agentId]
+      const d = await gate();
+      let id = process.argv[4] ? BigInt(process.argv[4]) : null;
+      if (id === null) { const s = await findAgentIdsForName(client, d, need(arg, "name"), { all: true }); if (!s.agentIds.length) { console.error(`no AgentBound for ${arg} in ${s.scannedFrom}-${s.scannedTo}`); process.exit(1); } id = s.agentIds[0]; }
+      show(await agentInfo(client, d, need(arg, "name"), id));
       break;
     }
     case "deploy-plan": {
