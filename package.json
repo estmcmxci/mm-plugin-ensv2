@@ -2,22 +2,36 @@
   "name": "@estmcmxci/mm-plugin-ensv2",
   "version": "0.7.0",
   "description": "ENSv2 for the MetaMask Agent Wallet CLI (mm): fail-closed detection, resolution, agent identity, primary names, and durable provisioning jobs on Sepolia",
+  "author": "estmcmxci \ud835\udd2a\u2736 (https://estmcmxci.co)",
   "license": "MIT",
-  "type": "module",
+  "homepage": "https://github.com/estmcmxci/mm-plugin-ensv2#readme",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/estmcmxci/mm-plugin-ensv2.git"
   },
-  "publishConfig": {
-    "access": "public"
+  "bugs": {
+    "url": "https://github.com/estmcmxci/mm-plugin-ensv2/issues"
   },
   "keywords": [
     "oclif-plugin",
+    "mm-plugin",
+    "metamask",
+    "agent-wallet",
     "ens",
     "ensv2",
-    "metamask",
-    "agent-wallet"
+    "erc-8004",
+    "agent-identity",
+    "ensip-25",
+    "ensip-26",
+    "sepolia"
   ],
+  "engines": {
+    "node": ">=20"
+  },
+  "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
   "files": [
     "dist",
     "oclif.manifest.json",
