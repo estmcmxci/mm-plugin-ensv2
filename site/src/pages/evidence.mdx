@@ -41,6 +41,17 @@ A wallet created for the purpose, funded with 0.004 ETH, run 2026-09-04 as the p
 
 Cold-wallet total: 8 writes, about 1.26M gas, roughly 0.0013 ETH at 1 gwei, 8.000021 USDC.
 
+## Step 8 — agentURI repointed at the registration files (0.7.2)
+
+Both agents were minted with `agentURI = https://estmcmxci.co`. With the registration files served here, `mm ensv2 agent set-uri` moved each pointer to its file through the adapter's `setAgentURI`, which forwards to the IdentityRegistry only for the bound token's controller.
+
+| Agent | Tx | Block | Gas | Checked |
+|---|---|---|---|---|
+| #10058 `grilledcheese.eth` | [`0xb79a181f…b3af40`](https://sepolia.etherscan.io/tx/0xb79a181fae4593caa1859f0a1deb6c2d5fb42dbfa5dc9ca98b89b157e1b3af40) | 11634275 | 114,664 | registry `tokenURI` = [`/agents/10058.json`](/agents/10058.json); the file's `registrations[0]` names agent 10058 on `eip155:11155111:0x8004A818…BD9e` |
+| #10059 `sesquipedalian.eth` | [`0x90d8b218…91c256`](https://sepolia.etherscan.io/tx/0x90d8b2187626bbf39ce08934aee448c3d3b8bcc5146d38c3c6db5f496d91c256) | 11634298 | 114,664 | same, for 10059 |
+
+Every hop is now checkable by a stranger: name → agent (ENSIP-25 record), agent → file (`agentURI`), file → agent and registry (`registrations`), file → endpoint (`services`).
+
 ## What the run proved
 
 - Detection refuses mainnet and confirms Sepolia ENSv2 on every command.

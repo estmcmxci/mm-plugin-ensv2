@@ -78,6 +78,7 @@ mm ensv2 faucet              mint Sepolia test USDC to this wallet (the beta's p
 mm ensv2 register <name>     commit → wait → register, paid in USDC, resolver bound at registration; resumable
 mm ensv2 agent register <name> --uri <agentURI>   mint an ERC-8004 agent via Adapter8004, bound to your name (one tx)
 mm ensv2 agent info <name> [--agent-id n]         the binding, orphan check, controller check, NFT holder, agentURI
+mm ensv2 agent set-uri <name> --uri <agentURI>    point the bound agent's agentURI at its registration JSON (one tx; no-op if set)
 mm ensv2 records set <name> [...]   addr + profile (ENSIP-5/12/18) + agent-context/agent-endpoint (ENSIP-26) + ENSIP-25 link, ONE tx
 mm ensv2 records get <name>         the record set as a stranger sees it, read through the Universal Resolver
 mm ensv2 primary get [address]      the address's primary name: raw reverse record, forward check, UR round-trip
@@ -176,6 +177,8 @@ The one thing a job does not write is the reverse record. When a job completes, 
 Adapter8004 (`unruggable-labs/adapter`) mints an agent on the canonical ERC-8004 IdentityRegistry and binds it to a token you control; the adapter holds the NFT and you control it through the token. For an ENSv2 name, the token is the name's entry in **the registry that holds it** (located via `UR.findParentRegistry`, never assumed) with its **current** token id from `getState()`. The adapter's ERC-721 control check calls `ownerOf(tokenId)` on that registry, which the ENSv2 ERC-1155 singleton exposes. One transaction; the agent id is read from the `AgentBound` event and the binding, controller status, and NFT holder are re-read from chain before success is reported.
 
 **The binding anchors on the token id, and ENSv2 regenerates that id on any role grant or revoke.** Bind, then delegate a role on the name → the binding points at a stale id. `agent info` reports `status: orphaned` when the bound id no longer matches the current one. Transfers and renewals do not change the id. A resource-anchored binding that survives role changes is being prepared upstream; until it lands, treat role changes on a bound name as a re-bind trigger.
+
+`agent set-uri` repoints a bound agent's `agentURI` (the ERC-8004 registration JSON) through the adapter's `setAgentURI`, which forwards to the IdentityRegistry only if the caller controls the bound token; it refuses for orphaned bindings and is a no-op when the URI already matches. The two live agents point at the registration files this project's docs site serves under `/agents/<id>.json`.
 
 ### The record set (`records set`)
 

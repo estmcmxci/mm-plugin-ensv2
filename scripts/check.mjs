@@ -15,7 +15,7 @@ import { SEPOLIA } from "../dist/lib/deployments.js";
 import { detectEnsV2, selfCheck } from "../dist/lib/ensv2.js";
 import { resolveQuery, resolverInfo, whois } from "../dist/lib/reads.js";
 import { buildDeployPlan, ownedResolverStatus } from "../dist/lib/resolver.js";
-import { agentInfo, bindPlan, findAgentIdsForName } from "../dist/lib/agent.js";
+import { agentInfo, bindPlan, findAgentIdsForName, setUriPlan } from "../dist/lib/agent.js";
 import { defaultContext, endpointKey, planRecords, readRecordSet } from "../dist/lib/records.js";
 import { ensip25Key } from "../dist/lib/erc7930.js";
 import { planSetPrimary, primaryStatus } from "../dist/lib/primary.js";
@@ -138,6 +138,18 @@ try {
       show({ name: plan.name, resolver: plan.resolver, calls: plan.calls, changes: Object.fromEntries(Object.entries(plan.changes).map(([k, c]) => [k, { from: c.from, to: c.to.length > 80 ? c.to.slice(0, 77) + "..." : c.to }])), unchanged: plan.unchanged, calldataBytes: plan.calldata ? (plan.calldata.data.length - 2) / 2 : 0, simulation: sim });
       break;
     }
+    case "agent-uri-plan": {
+      // npm run check -- agent-uri-plan <name> <owner> <uri> [agentId]   — setAgentURI calldata, eth_call'd from owner. Nothing sent.
+      const d = await gate();
+      const [name, owner, uri] = [need(arg, "name"), need(process.argv[4], "owner"), need(process.argv[5], "uri")];
+      let id = process.argv[6] ? BigInt(process.argv[6]) : null;
+      if (id === null) { const s = await findAgentIdsForName(client, d, name, { all: true }); if (!s.agentIds.length) { console.error(`no AgentBound for ${name}`); process.exit(1); } id = s.agentIds[0]; }
+      const plan = await setUriPlan(client, d, name, owner, id, uri);
+      let sim = "already set — nothing to send";
+      if (plan.calldata) { try { await client.call({ account: owner, to: plan.calldata.to, data: plan.calldata.data }); sim = "ok (eth_call of setAgentURI from owner succeeds)"; } catch (e) { sim = "REVERTED: " + (e.shortMessage ?? e.message); } }
+      show({ name: plan.name, agentId: plan.agentId, owner, currentURI: plan.currentURI, desiredURI: plan.desiredURI, alreadySet: plan.alreadySet, calldata: plan.calldata ? { ...plan.calldata, value: "0" } : null, simulation: sim });
+      break;
+    }
     case "agent-info": {
       // npm run check -- agent-info <name> [agentId]
       const d = await gate();
@@ -215,7 +227,7 @@ try {
       break;
     }
     default:
-      console.error(`unknown check "${cmd}" — one of: status, whois, resolver, resolve, predict, available, price, register-plan, agent-plan, agent-info, records-get, records-plan, primary, primary-plan, deploy-plan, provision-plan`);
+      console.error(`unknown check "${cmd}" — one of: status, whois, resolver, resolve, predict, available, price, register-plan, agent-plan, agent-info, agent-uri-plan, records-get, records-plan, primary, primary-plan, deploy-plan, provision-plan`);
       process.exit(2);
   }
 } catch (error) {

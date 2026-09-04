@@ -1,6 +1,6 @@
 {
   "name": "@estmcmxci/mm-plugin-ensv2",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "description": "ENSv2 for the MetaMask Agent Wallet CLI (mm): fail-closed detection, resolution, agent identity, primary names, and durable provisioning jobs on Sepolia",
   "author": "estmcmxci \ud835\udd2a\u2736 (https://estmcmxci.co)",
   "license": "MIT",
@@ -202,6 +202,20 @@
           "wallet-read"
         ],
         "dataAccess": [
+          "network"
+        ],
+        "targetChains": [
+          11155111
+        ]
+      },
+      {
+        "id": "ensv2:agent:set-uri",
+        "capabilities": [
+          "wallet-read",
+          "wallet-submit"
+        ],
+        "dataAccess": [
+          "accounts",
           "network"
         ],
         "targetChains": [
