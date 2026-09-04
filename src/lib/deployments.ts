@@ -37,11 +37,16 @@ export type EnsV2Deployment = {
   /** The `.eth` PermissionedRegistry — where 2LDs live. */
   readonly registry: `0x${string}`;
   readonly registrar: `0x${string}`;
+  readonly rentPriceOracle: `0x${string}`;
   readonly paymentToken: `0x${string}`;
   readonly resolverFactory: `0x${string}`;
   readonly resolverImplementation: `0x${string}`;
   readonly resolverProxyLogic: `0x${string}`;
   readonly subregistryImplementation: `0x${string}`;
+  /** Adapter8004 proxy (unruggable-labs/adapter). Mints on the canonical ERC-8004 registry and binds the agent to a token. */
+  readonly adapter8004: `0x${string}`;
+  /** Canonical ERC-8004 IdentityRegistry, as reported by adapter8004.identityRegistry(). */
+  readonly identityRegistry: `0x${string}`;
 };
 
 export const SEPOLIA: EnsV2Deployment = {
@@ -50,11 +55,15 @@ export const SEPOLIA: EnsV2Deployment = {
   rootRegistry: "0x8115186E8f2E0B0281e86ab91f0f48Ba90364354",
   registry: "0xBDC85dD5b15D7ecb354cd7cb6f2c50b4f2c4F0E2",
   registrar: "0xa88553F454b77203B0D036A05c894d555EAAa2Cc",
+  rentPriceOracle: "0x8914b66260eb8c4fff795650c3ae8cd335958987",
   paymentToken: "0x768F42455A2D082E23ceeF7d51e5787C82d67a39",
   resolverFactory: "0x10dC6333CDFe1FCEf624c6e0a8221b91804Cd7ef",
   resolverImplementation: "0x9EAe5C2730a7dD16BDD1DeE6421a1B91e3B0365e",
   resolverProxyLogic: "0xA136BeE4E37B44586242e516a39893EfD54315e9",
   subregistryImplementation: "0x624a25d67B59D587752EbEc8DdeD8827dAe52050",
+  // Adapter README + live EIP-1967 slot (impl 0x31a68E5b…) + identityRegistry() call, all checked 2026-09-03.
+  adapter8004: "0x7621630cB63a73a194f45A3E6801B8C6A7eC2f92",
+  identityRegistry: "0x8004A818BFB912233c491871b3d84c89A494BD9e",
 };
 
 export const DEPLOYMENTS: Readonly<Record<number, EnsV2Deployment>> = {

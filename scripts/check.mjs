@@ -14,6 +14,15 @@ import { SEPOLIA } from "../dist/lib/deployments.js";
 import { detectEnsV2, selfCheck } from "../dist/lib/ensv2.js";
 import { resolveQuery, resolverInfo, whois } from "../dist/lib/reads.js";
 import { buildDeployPlan, ownedResolverStatus } from "../dist/lib/resolver.js";
+import { agentInfo, bindPlan, findAgentIdsForName } from "../dist/lib/agent.js";
+import { defaultContext, endpointKey, planRecords, readRecordSet } from "../dist/lib/records.js";
+import { ensip25Key } from "../dist/lib/erc7930.js";
+import { decodeFunctionResult } from "viem";
+import { adapter8004Abi } from "../dist/lib/abis.js";
+import {
+  ZERO_ADDRESS, ZERO_REFERRER, buildApprove, buildCommit, buildRegister, checkAvailable, computeCommitment,
+  makeSecret, quoteRegistration, tokenState, yearsToSeconds,
+} from "../dist/lib/registrar.js";
 
 const rpc = process.env.ETH_RPC_URL ?? "https://ethereum-sepolia-rpc.publicnode.com";
 const client = createPublicClient({ transport: http(rpc) });
@@ -54,6 +63,83 @@ try {
       // Where would <owner>'s resolver be, and does it exist? Read-only.
       show(await ownedResolverStatus(client, await gate(), need(arg, "owner-address")));
       break;
+    case "available":
+      show(await checkAvailable(client, await gate(), need(arg, "label|name.eth")));
+      break;
+    case "price": {
+      // npm run check -- price <label> [years]
+      const years = process.argv[4];
+      show(await quoteRegistration(client, await gate(), need(arg, "label|name.eth"), yearsToSeconds(years)));
+      break;
+    }
+    case "register-plan": {
+      // npm run check -- register-plan <label> <owner> [years]
+      // Everything `ensv2 register` would do, up to but not including sending. Throwaway secret.
+      const d = await gate();
+      const owner = need(process.argv[4], "owner-address");
+      const avail = await checkAvailable(client, d, need(arg, "label"));
+      const res = await ownedResolverStatus(client, d, owner);
+      const duration = yearsToSeconds(process.argv[5]);
+      const quote = avail.available ? await quoteRegistration(client, d, avail.label, duration) : null;
+      const funds = await tokenState(client, d, owner);
+      const params = { label: avail.label, owner, secret: makeSecret(), subregistry: ZERO_ADDRESS, resolver: res.predicted, durationSeconds: duration, referrer: ZERO_REFERRER };
+      const commitment = await computeCommitment(client, d, params);
+      const [approve, commit, register] = [buildApprove(d, BigInt(quote?.total ?? 0)), buildCommit(d, commitment), buildRegister(d, params)];
+      let commitSim = "not simulated";
+      try { await client.call({ account: owner, to: commit.to, data: commit.data }); commitSim = "ok (eth_call from owner succeeds)"; } catch (e) { commitSim = "REVERTED: " + (e.shortMessage ?? e.message); }
+      show({
+        name: avail.name, available: avail.available,
+        resolver: { predicted: res.predicted, deployed: res.deployed, verified: res.verified },
+        quote: quote && { total: quote.formatted.total, symbol: quote.paymentToken.symbol, years: quote.durationYears },
+        funds: { balance: funds.balance.toString(), allowance: funds.allowance.toString(), sufficient: quote ? funds.balance >= BigInt(quote.total) : null },
+        commitment, commitSimulation: commitSim,
+        calldata: { approve: { to: approve.to, selector: approve.data.slice(0, 10), bytes: (approve.data.length - 2) / 2 }, commit: { to: commit.to, selector: commit.data.slice(0, 10), bytes: (commit.data.length - 2) / 2 }, register: { to: register.to, selector: register.data.slice(0, 10), bytes: (register.data.length - 2) / 2 } },
+      });
+      break;
+    }
+    case "agent-plan": {
+      // npm run check -- agent-plan <name> <owner> <agentURI>
+      // Preconditions + calldata, then eth_call the REAL adapter.register from the owner: returns the agentId it would mint.
+      const d = await gate();
+      const owner = need(process.argv[4], "owner-address");
+      const plan = await bindPlan(client, d, need(arg, "name"), owner, need(process.argv[5], "agentURI"));
+      let sim;
+      try {
+        const { data } = await client.call({ account: owner, to: plan.calldata.to, data: plan.calldata.data });
+        sim = { ok: true, wouldMintAgentId: decodeFunctionResult({ abi: adapter8004Abi, functionName: "register", data }).toString() };
+      } catch (e) { sim = { ok: false, reverted: e.shortMessage ?? e.message }; }
+      show({ name: plan.name, owner, tokenContract: plan.tokenContract, tokenId: "0x" + plan.tokenId.toString(16), standard: plan.standard, agentURI: plan.agentURI,
+             calldata: { to: plan.calldata.to, selector: plan.calldata.data.slice(0, 10), bytes: (plan.calldata.data.length - 2) / 2 }, simulation: sim });
+      break;
+    }
+    case "records-get": {
+      // npm run check -- records-get <name> [agentId,...]
+      const d = await gate();
+      show(await readRecordSet(client, d, need(arg, "name"), { agentIds: process.argv[4] ? process.argv[4].split(",") : [] }));
+      break;
+    }
+    case "records-plan": {
+      // npm run check -- records-plan <name> <owner> <description> <webUrl> <agentId>
+      // Diff vs chain, build the multicall, eth_call it from the owner. Nothing sent.
+      const d = await gate();
+      const [name, owner, description, web, agentId] = [need(arg, "name"), need(process.argv[4], "owner"), process.argv[5] ?? "ENSv2 agent wallet on Sepolia", process.argv[6] ?? "https://estmcmxci.co", process.argv[7]];
+      const endpoints = { web };
+      const texts = { description, url: web, [endpointKey("web")]: web, "agent-context": defaultContext(name, description, endpoints, agentId) };
+      if (agentId) texts[ensip25Key(d.chainId, d.identityRegistry, agentId)] = "1";
+      const plan = await planRecords(client, d, name, owner, { addr: owner, texts });
+      let sim = "nothing to write";
+      if (plan.calldata) { try { await client.call({ account: owner, to: plan.calldata.to, data: plan.calldata.data }); sim = "ok (eth_call of the multicall from owner succeeds)"; } catch (e) { sim = "REVERTED: " + (e.shortMessage ?? e.message); } }
+      show({ name: plan.name, resolver: plan.resolver, calls: plan.calls, changes: Object.fromEntries(Object.entries(plan.changes).map(([k, c]) => [k, { from: c.from, to: c.to.length > 80 ? c.to.slice(0, 77) + "..." : c.to }])), unchanged: plan.unchanged, calldataBytes: plan.calldata ? (plan.calldata.data.length - 2) / 2 : 0, simulation: sim });
+      break;
+    }
+    case "agent-info": {
+      // npm run check -- agent-info <name> [agentId]
+      const d = await gate();
+      let id = process.argv[4] ? BigInt(process.argv[4]) : null;
+      if (id === null) { const s = await findAgentIdsForName(client, d, need(arg, "name"), { all: true }); if (!s.agentIds.length) { console.error(`no AgentBound for ${arg} in ${s.scannedFrom}-${s.scannedTo}`); process.exit(1); } id = s.agentIds[0]; }
+      show(await agentInfo(client, d, need(arg, "name"), id));
+      break;
+    }
     case "deploy-plan": {
       // The exact calldata `ensv2 resolver deploy` would hand to the wallet. Nothing is sent.
       const d = await gate();

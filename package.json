@@ -1,6 +1,6 @@
 {
   "name": "@estmcmxci/mm-plugin-ensv2",
-  "version": "0.1.0",
+  "version": "0.6.0",
   "description": "ENSv2 for the MetaMask Agent Wallet CLI (mm): fail-closed detection, resolution, and agent identity on Sepolia",
   "license": "MIT",
   "type": "module",
@@ -37,6 +37,12 @@
       },
       "ensv2:resolver": {
         "description": "Inspect, predict, and deploy this wallet's ENSv2 resolver"
+      },
+      "ensv2:agent": {
+        "description": "ERC-8004 agent identity bound to an ENSv2 name (via Adapter8004)"
+      },
+      "ensv2:records": {
+        "description": "The name's records: addr, profile, ENSIP-25/26 agent records"
       }
     }
   },
@@ -83,6 +89,112 @@
       },
       {
         "id": "ensv2:resolver",
+        "capabilities": [
+          "wallet-read"
+        ],
+        "dataAccess": [
+          "network"
+        ],
+        "targetChains": [
+          11155111
+        ]
+      },
+      {
+        "id": "ensv2:available",
+        "capabilities": [
+          "wallet-read"
+        ],
+        "dataAccess": [
+          "network"
+        ],
+        "targetChains": [
+          11155111
+        ]
+      },
+      {
+        "id": "ensv2:price",
+        "capabilities": [
+          "wallet-read"
+        ],
+        "dataAccess": [
+          "network"
+        ],
+        "targetChains": [
+          11155111
+        ]
+      },
+      {
+        "id": "ensv2:faucet",
+        "capabilities": [
+          "wallet-read",
+          "wallet-submit"
+        ],
+        "dataAccess": [
+          "accounts",
+          "balances",
+          "network"
+        ],
+        "targetChains": [
+          11155111
+        ]
+      },
+      {
+        "id": "ensv2:register",
+        "capabilities": [
+          "wallet-read",
+          "wallet-submit"
+        ],
+        "dataAccess": [
+          "accounts",
+          "balances",
+          "network"
+        ],
+        "targetChains": [
+          11155111
+        ]
+      },
+      {
+        "id": "ensv2:agent:register",
+        "capabilities": [
+          "wallet-read",
+          "wallet-submit"
+        ],
+        "dataAccess": [
+          "accounts",
+          "network"
+        ],
+        "targetChains": [
+          11155111
+        ]
+      },
+      {
+        "id": "ensv2:agent:info",
+        "capabilities": [
+          "wallet-read"
+        ],
+        "dataAccess": [
+          "network"
+        ],
+        "targetChains": [
+          11155111
+        ]
+      },
+      {
+        "id": "ensv2:records:set",
+        "capabilities": [
+          "wallet-read",
+          "wallet-submit"
+        ],
+        "dataAccess": [
+          "accounts",
+          "network"
+        ],
+        "targetChains": [
+          11155111
+        ]
+      },
+      {
+        "id": "ensv2:records:get",
         "capabilities": [
           "wallet-read"
         ],
