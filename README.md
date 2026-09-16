@@ -4,13 +4,13 @@
 
 ENSv2 names and ERC-8004 agent identity, natively inside the [MetaMask Agent Wallet](https://docs.metamask.io/agent-wallet/) CLI (`mm`). An agent wallet can register an ENSv2 name it owns, deploy its own resolver, mint an ERC-8004 agent bound to that name, publish the ENSIP-25/26 records that make it discoverable, and set the name as its primary name — every signature routed through MetaMask policy and MFA, every write verified on chain before the command returns.
 
-**Sepolia only, by design.** ENSv2 is a beta with non-final interfaces; this plugin refuses to run against anything else, and it never falls back to ENSv1 behaviour. Two Sepolia deployments are pinned — the canonical beta (default) and ENS Labs' ETHOnline hackathon deployment (`--deployment hackathon`); see [Which deployment](#which-deployment). Docs, explainer and live evidence: **https://mm-ensv2.estmcmxci.co** (every page is also Markdown: append `.md`, or fetch `/llms.txt`).
+**Sepolia only, by design.** ENSv2 is a beta with non-final interfaces; this plugin refuses to run against anything else, and it never falls back to ENSv1 behaviour. Two Sepolia deployments are pinned — the canonical `beta` and ENS Labs' ETHOnline hackathon deployment (`--deployment hackathon`, now the **default**, since `beta` stopped serving ENSv2 as of 2026-09-16 — see [Which deployment](#which-deployment)). Docs, explainer and live evidence: **https://mm-ensv2.estmcmxci.co** (every page is also Markdown: append `.md`, or fetch `/llms.txt`).
 
 ## Sixty seconds
 
 ```bash
 mm ensv2 status                        # is this chain really serving ENSv2? fail-closed checks, refuses otherwise
-mm ensv2 faucet                        # 100 test USDC, the beta's payment token
+mm ensv2 faucet                        # 100 test USDC, this deployment's payment token
 mm ensv2 provision myagent --agent-uri https://agent.example/agent.json --endpoints web=https://agent.example
 mm ensv2 primary set myagent.eth       # the wallet now resolves back to its name
 ```
@@ -67,20 +67,22 @@ Rules that keep you out of trouble: **never re-send a write because a call faile
 
 ## Which deployment
 
-Two ENSv2 deployments are pinned, **both on Sepolia (chain 11155111)**. Pick one with `--deployment`, available on every command; `MM_ENSV2_DEPLOYMENT` is the fallback, and the default is `beta`.
+Two ENSv2 deployments are pinned, **both on Sepolia (chain 11155111)**. Pick one with `--deployment`, available on every command; `MM_ENSV2_DEPLOYMENT` is the fallback.
 
-| | `beta` *(default)* | `hackathon` |
+**As of 2026-09-16, `hackathon` is the default — but `beta` is still ENS Labs' canonical deployment.** `beta`'s Universal Resolver (`0xeEeE…EeEe`) stopped matching our pinned g1 table because ENS Labs redeployed it on 2026-09-15 to a new (third) contract generation — confirmed directly by Kevin at ENS Labs, not a failure. `mm ensv2 status --deployment beta` reports `ENSv2 NOT ACTIVE` only because this plugin hasn't onboarded that new generation yet, not because `beta` is gone. The new deployment is recorded on a working, not-yet-merged ENS docs branch (docs.ens.domains itself still shows the stale table): https://feature-permres-inode-refact.docs-bao.pages.dev/learn/deployments/#sepolia-ensv2-beta. `hackathon` stays the default until `beta`'s new generation is properly re-pinned, which is waiting on that docs branch to merge.
+
+| | `beta` | `hackathon` *(default)* |
 |---|---|---|
-| What it is | The canonical ENSv2 Sepolia beta — the deployment `mm ensv2` has talked to since v0.1 | ENS Labs' dedicated deployment for the **ETHOnline 2026** hackathon |
+| What it is | ENS Labs' canonical Sepolia deployment — redeployed 2026-09-15 to a generation not yet onboarded here, see above | ENS Labs' dedicated deployment for the **ETHOnline 2026** hackathon |
 | Deployment id | `ensv2-sepolia-2026-07-30` | `ensv2-sepolia-hackathon-2026-09` |
-| Contract generation | g1 | **g2 — newer** |
-| Lifetime | ongoing | **not announced; treat it as temporary** |
-| Use it when | always, unless you need the other | you are building against the hackathon addresses |
+| Contract generation | g1 (stale — live chain is on a newer, unpinned generation) | **g2** |
+| Lifetime | this table is stale as of 2026-09-16; the deployment itself is ongoing | not announced; status pending ENS Labs |
+| Use it when | not yet — this table doesn't match what's live; use `hackathon` until it's re-pinned | always, for now |
 
 ```bash
-mm ensv2 status --deployment hackathon
-mm ensv2 whois grilledcheese.eth --deployment hackathon
-export MM_ENSV2_DEPLOYMENT=hackathon    # …or set it once for the session
+mm ensv2 status --deployment beta       # confirm before relying on it — currently reports NOT ACTIVE (stale table, not a dead deployment)
+mm ensv2 whois grilledcheese.eth --deployment beta
+export MM_ENSV2_DEPLOYMENT=beta    # …or set it once for the session
 ```
 
 **They are different contract generations, and the gate never accepts one for the other.** `--deployment beta` run against the hackathon contracts is refused on its first check, and the reverse likewise. What actually moved between them:
@@ -96,7 +98,7 @@ export MM_ENSV2_DEPLOYMENT=hackathon    # …or set it once for the session
 | Forward + reverse resolution | `findResolver` / `resolve` / `reverse` on the UR | identical |
 | ERC-8004 adapter + IdentityRegistry | same contracts | same contracts |
 
-**Names and agents are per deployment.** A registration, a resolver, a primary name and an ERC-8004 binding all belong to the deployment they were made on. `mm ensv2 whois agent.eth` and `mm ensv2 whois agent.eth --deployment hackathon` are two different questions with two different answers; a name that is taken on one may well be free on the other; and a provisioning job created under one deployment refuses to resume under the other (`E_UNSUPPORTED_DEPLOYMENT`). Each deployment has its own payment token, so `mm ensv2 faucet --deployment hackathon` mints a *different* test USDC from the beta's.
+**Names and agents are per deployment.** A registration, a resolver, a primary name and an ERC-8004 binding all belong to the deployment they were made on. `mm ensv2 whois agent.eth` and `mm ensv2 whois agent.eth --deployment beta` are two different questions with two different answers; a name that is taken on one may well be free on the other; and a provisioning job created under one deployment refuses to resume under the other (`E_UNSUPPORTED_DEPLOYMENT`). Each deployment has its own payment token, so `mm ensv2 faucet --deployment beta` mints a *different* test USDC from the hackathon's.
 
 `--chain` is unchanged: 11155111 or a refusal. Mainnet stays disabled until a canonical production deployment exists.
 
@@ -109,7 +111,7 @@ mm ensv2 whois <name>        status, expiry, owner, token id, registration epoch
 mm ensv2 resolver <name>     which resolver answers for the name: its own, an ancestor's, or none
 mm ensv2 available <name>    can this .eth label be registered? (asks the registrar; accounts for grace + v1 reservations)
 mm ensv2 price <name>        ERC-20 cost to register, quoted by the registrar (--years n, default 1)
-mm ensv2 faucet              mint Sepolia test USDC to this wallet (the beta's payment token) — Sepolia only
+mm ensv2 faucet              mint Sepolia test USDC to this wallet (this deployment's payment token) — Sepolia only
 mm ensv2 register <name>     commit → wait → register, paid in USDC, resolver bound at registration; resumable
 mm ensv2 agent register <name> --uri <agentURI>   mint an ERC-8004 agent via Adapter8004, bound to your name (one tx)
 mm ensv2 agent info <name> [--agent-id n]         the binding, orphan check, controller check, NFT holder, agentURI
@@ -130,7 +132,7 @@ mm ensv2 jobs abandon <jobId>       set a finished or failed job aside (renamed,
 Every command above also accepts:
 
 ```
---deployment <beta|hackathon>   which pinned Sepolia deployment to talk to (default beta; env MM_ENSV2_DEPLOYMENT)
+--deployment <beta|hackathon>   which pinned Sepolia deployment to talk to (default hackathon; env MM_ENSV2_DEPLOYMENT)
 --chain <id>                    EVM chain id (default 11155111; anything else is refused)
 --json                          machine-readable output
 ```

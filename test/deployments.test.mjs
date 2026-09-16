@@ -49,11 +49,11 @@ const lower = (s) => String(s).toLowerCase();
 // ---------------------------------------------------------------------------
 // the table
 
-test("two deployments are pinned, both Sepolia, beta is the default and unchanged", () => {
+test("two deployments are pinned, both Sepolia, hackathon is the default since beta went dead", () => {
   assert.deepEqual([...DEPLOYMENT_KEYS], ["beta", "hackathon"]);
-  assert.equal(DEFAULT_DEPLOYMENT_KEY, "beta");
-  assert.equal(deploymentForChain(11155111), SEPOLIA);
-  assert.equal(deploymentFor(11155111), SEPOLIA);
+  assert.equal(DEFAULT_DEPLOYMENT_KEY, "hackathon");
+  assert.equal(deploymentForChain(11155111), SEPOLIA_HACKATHON);
+  assert.equal(deploymentFor(11155111), SEPOLIA_HACKATHON);
   assert.equal(deploymentFor(11155111, "hackathon"), SEPOLIA_HACKATHON);
   assert.equal(deploymentFor(1, "hackathon"), undefined);
   assert.equal(deploymentsOnChain(11155111).length, 2);
@@ -114,17 +114,17 @@ test("every pinned address is EIP-55 checksummed", async () => {
 // deployment selection: flag > env > default
 
 test("selection precedence: --deployment beats the env var beats the default", () => {
-  assert.equal(parseDeploymentKey(undefined, {}), "beta");
-  assert.equal(parseDeploymentKey("", {}), "beta");
-  assert.equal(parseDeploymentKey(undefined, { MM_ENSV2_DEPLOYMENT: "hackathon" }), "hackathon");
-  assert.equal(parseDeploymentKey("beta", { MM_ENSV2_DEPLOYMENT: "hackathon" }), "beta", "the flag wins over the env var");
-  assert.equal(parseDeploymentKey("hackathon", { MM_ENSV2_DEPLOYMENT: "beta" }), "hackathon");
-  assert.equal(parseDeploymentKey("  hackathon  ", {}), "hackathon", "surrounding whitespace is trimmed");
-  assert.equal(parseDeploymentKey(undefined, { MM_ENSV2_DEPLOYMENT: "  beta " }), "beta");
+  assert.equal(parseDeploymentKey(undefined, {}), "hackathon");
+  assert.equal(parseDeploymentKey("", {}), "hackathon");
+  assert.equal(parseDeploymentKey(undefined, { MM_ENSV2_DEPLOYMENT: "beta" }), "beta");
+  assert.equal(parseDeploymentKey("hackathon", { MM_ENSV2_DEPLOYMENT: "beta" }), "hackathon", "the flag wins over the env var");
+  assert.equal(parseDeploymentKey("beta", { MM_ENSV2_DEPLOYMENT: "hackathon" }), "beta");
+  assert.equal(parseDeploymentKey("  beta  ", {}), "beta", "surrounding whitespace is trimmed");
+  assert.equal(parseDeploymentKey(undefined, { MM_ENSV2_DEPLOYMENT: "  hackathon " }), "hackathon");
 
-  assert.deepEqual(deploymentSelection(undefined, {}), { key: "beta", explicit: false, source: "default" });
-  assert.deepEqual(deploymentSelection(undefined, { MM_ENSV2_DEPLOYMENT: "beta" }), { key: "beta", explicit: true, source: "env" });
-  assert.deepEqual(deploymentSelection("beta", {}), { key: "beta", explicit: true, source: "flag" });
+  assert.deepEqual(deploymentSelection(undefined, {}), { key: "hackathon", explicit: false, source: "default" });
+  assert.deepEqual(deploymentSelection(undefined, { MM_ENSV2_DEPLOYMENT: "hackathon" }), { key: "hackathon", explicit: true, source: "env" });
+  assert.deepEqual(deploymentSelection("hackathon", {}), { key: "hackathon", explicit: true, source: "flag" });
 });
 
 test("an unknown deployment is refused, never silently defaulted", () => {
@@ -145,8 +145,8 @@ test("an unknown deployment is refused, never silently defaulted", () => {
 });
 
 test("requireDeployment: --chain still refuses anything but Sepolia, for both deployments", () => {
-  assert.equal(requireDeployment(11155111), SEPOLIA);
-  assert.equal(requireDeployment(11155111, "hackathon"), SEPOLIA_HACKATHON);
+  assert.equal(requireDeployment(11155111), SEPOLIA_HACKATHON);
+  assert.equal(requireDeployment(11155111, "beta"), SEPOLIA);
   assert.equal(parseChainId(undefined), 11155111);
   for (const key of DEPLOYMENT_KEYS) {
     for (const chain of [1, 8453, 11155420]) {

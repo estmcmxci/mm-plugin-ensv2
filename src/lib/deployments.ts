@@ -2,12 +2,25 @@
  * ENSv2 deployment table.
  *
  * TWO deployments are pinned, both on Sepolia (chain 11155111), selected by
- * `--deployment <beta|hackathon>` (env `MM_ENSV2_DEPLOYMENT`, default `beta`):
+ * `--deployment <beta|hackathon>` (env `MM_ENSV2_DEPLOYMENT`, default
+ * `hackathon` as of 2026-09-16 — see below):
  *
- *   beta       ensv2-sepolia-2026-07-30           generation g1 — the canonical
- *              ENSv2 Sepolia beta. Unchanged from v0.7.2; still the default.
+ *   beta       ensv2-sepolia-2026-07-30           generation g1 — this table
+ *              is STALE as of 2026-09-16: ENS Labs redeployed `beta` on
+ *              2026-09-15 to a THIRD contract generation (confirmed by Kevin,
+ *              ENS Labs, not a break). Same proxy address, new implementation
+ *              that answers false to both g1 (0xf99a5e06) and g2 (0x1a6cc9f0)
+ *              interface probes. `beta` remains ENS Labs' canonical line —
+ *              it was never abandoned for `hackathon` — but this g1 table has
+ *              not been onboarded to the new generation yet; see the deployment
+ *              table's own header comment below for the redeploy evidence and
+ *              the not-yet-merged docs branch. Kept pinned (not deleted) so old
+ *              jobs/receipts still resolve their deploymentId.
  *   hackathon  ensv2-sepolia-hackathon-2026-09    generation g2 — ENS Labs'
- *              dedicated ETHOnline 2026 deployment, a NEWER contract generation.
+ *              dedicated ETHOnline 2026 deployment. Promoted to DEFAULT on
+ *              2026-09-16 only because it is the only pinned table that still
+ *              matches something live (verified: `npm run check -- --deployment
+ *              hackathon` passes all 7 checks) — not because it is canonical.
  *
  * The two generations are NOT interchangeable, and the gate never cross-accepts
  * one for the other (see ensv2.ts). What actually differs:
@@ -136,8 +149,11 @@ export type EnsV2Deployment = {
 };
 
 /**
- * The canonical ENSv2 Sepolia beta — generation g1, and the default. Unchanged
- * from v0.7.2 in every address; `key` and `generation` are new metadata only.
+ * The g1 generation of the ENSv2 Sepolia beta — STALE as of 2026-09-16, when
+ * ENS Labs redeployed `beta` to a third generation this table does not yet
+ * describe (see the file header). No longer the default for that reason, not
+ * because `beta` itself was retired — it remains ENS Labs' canonical line.
+ * Addresses unchanged from v0.7.2; kept pinned for existing jobs/receipts.
  */
 export const SEPOLIA: EnsV2Deployment = {
   key: "beta",
@@ -162,11 +178,15 @@ export const SEPOLIA: EnsV2Deployment = {
 };
 
 /**
- * ENS Labs' dedicated ETHOnline 2026 hackathon deployment — generation g2.
- * Every address below is a row of the deployments page named in the file
- * header, checksummed; the derivations listed there were reproduced live on
- * 2026-09-04. Separate namespace from the beta: a name registered on one does
- * not exist on the other, and neither do the agents bound to it.
+ * ENS Labs' dedicated ETHOnline 2026 hackathon deployment — generation g2, and
+ * the default as of 2026-09-16 only because the pinned `beta` (g1) table went
+ * stale (see the file header) — NOT because this is canonical. `beta` itself
+ * is still ENS Labs' canonical line, just on a newer generation not yet
+ * onboarded here. Every address below is a row of the deployments page named
+ * in the file header, checksummed; the derivations listed there were
+ * reproduced live on 2026-09-04. Separate namespace from `beta`: a name
+ * registered on one does not exist on the other, and neither do the agents
+ * bound to it.
  */
 export const SEPOLIA_HACKATHON: EnsV2Deployment = {
   key: "hackathon",
@@ -205,8 +225,15 @@ export const SEPOLIA_HACKATHON: EnsV2Deployment = {
   reverseRegistrar: "0x060D5a54a8751eEc63B756E32Ef66f5eEf418e60",
 };
 
-/** The deployment used when neither `--deployment` nor `MM_ENSV2_DEPLOYMENT` says otherwise. */
-export const DEFAULT_DEPLOYMENT_KEY: DeploymentKey = "beta";
+/**
+ * The deployment used when neither `--deployment` nor `MM_ENSV2_DEPLOYMENT`
+ * says otherwise. `hackathon` since 2026-09-16 — `beta` was the default from
+ * launch through v0.8.0, but its pinned g1 table went stale when ENS Labs
+ * redeployed it on 2026-09-15 to a generation this file doesn't describe yet
+ * (see the file header). `hackathon` is the only pinned deployment still
+ * passing the gate, not the canonical one.
+ */
+export const DEFAULT_DEPLOYMENT_KEY: DeploymentKey = "hackathon";
 
 /** Every pinned deployment, keyed by its `--deployment` selector. */
 export const DEPLOYMENTS: Readonly<Record<DeploymentKey, EnsV2Deployment>> = {
