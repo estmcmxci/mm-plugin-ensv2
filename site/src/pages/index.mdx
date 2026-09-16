@@ -14,7 +14,7 @@ It runs against the **ENSv2 Sepolia beta** only. Mainnet is refused until a cano
 ```sh
 mm plugins install @estmcmxci/mm-plugin-ensv2 --accept-permissions
 mm ensv2 status                        # is this chain really serving ENSv2? 5 checks, refuses otherwise
-mm ensv2 faucet                        # 100 test USDC, the beta's payment token
+mm ensv2 faucet                        # 100 test USDC, this deployment's payment token
 mm ensv2 provision myagent --agent-uri https://example.com/agent.json --endpoints web=https://example.com
 mm ensv2 primary set myagent.eth       # the wallet now resolves back to its name
 ```

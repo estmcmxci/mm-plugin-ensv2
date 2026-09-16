@@ -2,12 +2,22 @@
  * ENSv2 deployment table.
  *
  * TWO deployments are pinned, both on Sepolia (chain 11155111), selected by
- * `--deployment <beta|hackathon>` (env `MM_ENSV2_DEPLOYMENT`, default `beta`):
+ * `--deployment <beta|hackathon>` (env `MM_ENSV2_DEPLOYMENT`, default
+ * `hackathon` as of 2026-09-16 — see below):
  *
- *   beta       ensv2-sepolia-2026-07-30           generation g1 — the canonical
- *              ENSv2 Sepolia beta. Unchanged from v0.7.2; still the default.
+ *   beta       ensv2-sepolia-2026-07-30           generation g1 — WAS the
+ *              canonical ENSv2 Sepolia beta. DEAD as of 2026-09-16: the
+ *              Universal Resolver proxy's implementation was upgraded
+ *              underneath the same address and no longer answers true to
+ *              either generation's interface probe (0xf99a5e06 or
+ *              0x1a6cc9f0). docs.ens.domains still lists this address as
+ *              canonical; only the live behavior changed. Kept in the table
+ *              (not deleted) so old jobs/receipts still resolve their
+ *              deploymentId, and in case it comes back.
  *   hackathon  ensv2-sepolia-hackathon-2026-09    generation g2 — ENS Labs'
- *              dedicated ETHOnline 2026 deployment, a NEWER contract generation.
+ *              dedicated ETHOnline 2026 deployment. Promoted to DEFAULT on
+ *              2026-09-16 because it is the only one still live (verified:
+ *              `npm run check -- --deployment hackathon` passes all 7 checks).
  *
  * The two generations are NOT interchangeable, and the gate never cross-accepts
  * one for the other (see ensv2.ts). What actually differs:
@@ -136,8 +146,10 @@ export type EnsV2Deployment = {
 };
 
 /**
- * The canonical ENSv2 Sepolia beta — generation g1, and the default. Unchanged
- * from v0.7.2 in every address; `key` and `generation` are new metadata only.
+ * WAS the canonical ENSv2 Sepolia beta — generation g1. No longer the
+ * default as of 2026-09-16: live on chain, but its Universal Resolver no
+ * longer answers as ENSv2 (see the file header). Addresses unchanged from
+ * v0.7.2; kept pinned for existing jobs/receipts and in case it returns.
  */
 export const SEPOLIA: EnsV2Deployment = {
   key: "beta",
@@ -162,11 +174,15 @@ export const SEPOLIA: EnsV2Deployment = {
 };
 
 /**
- * ENS Labs' dedicated ETHOnline 2026 hackathon deployment — generation g2.
+ * ENS Labs' dedicated ETHOnline 2026 hackathon deployment — generation g2, and
+ * the default as of 2026-09-16 (see the file header — `beta` went dead).
  * Every address below is a row of the deployments page named in the file
  * header, checksummed; the derivations listed there were reproduced live on
  * 2026-09-04. Separate namespace from the beta: a name registered on one does
- * not exist on the other, and neither do the agents bound to it.
+ * not exist on the other, and neither do the agents bound to it. Whether this
+ * becomes THE canonical Sepolia deployment ahead of mainnet, or is itself
+ * retired once `beta` (or a successor) returns, is an open question out to
+ * ENS Labs — see the outreach note this program tracks.
  */
 export const SEPOLIA_HACKATHON: EnsV2Deployment = {
   key: "hackathon",
@@ -205,8 +221,14 @@ export const SEPOLIA_HACKATHON: EnsV2Deployment = {
   reverseRegistrar: "0x060D5a54a8751eEc63B756E32Ef66f5eEf418e60",
 };
 
-/** The deployment used when neither `--deployment` nor `MM_ENSV2_DEPLOYMENT` says otherwise. */
-export const DEFAULT_DEPLOYMENT_KEY: DeploymentKey = "beta";
+/**
+ * The deployment used when neither `--deployment` nor `MM_ENSV2_DEPLOYMENT`
+ * says otherwise. `hackathon` since 2026-09-16 — `beta` was the default from
+ * launch through v0.8.0, but its Universal Resolver stopped serving ENSv2
+ * (verified live; see the file header) and `hackathon` is the only pinned
+ * deployment still passing the gate.
+ */
+export const DEFAULT_DEPLOYMENT_KEY: DeploymentKey = "hackathon";
 
 /** Every pinned deployment, keyed by its `--deployment` selector. */
 export const DEPLOYMENTS: Readonly<Record<DeploymentKey, EnsV2Deployment>> = {

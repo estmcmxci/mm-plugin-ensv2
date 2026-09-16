@@ -7,7 +7,7 @@ description: "The two pinned ENSv2 Sepolia deployments the plugin talks to, and 
 
 # Deployment table
 
-The plugin pins **2 deployments**, both on chain **11155111** (Sepolia), selected with `--deployment <beta|hackathon>` (or `MM_ENSV2_DEPLOYMENT`; default `beta`). Mainnet is deliberately absent: ENSv2 is a beta with non-final interfaces, and the plugin refuses any other chain.
+The plugin pins **2 deployments**, both on chain **11155111** (Sepolia), selected with `--deployment <beta|hackathon>` (or `MM_ENSV2_DEPLOYMENT`; default `hackathon`). Mainnet is deliberately absent: ENSv2 is a beta with non-final interfaces, and the plugin refuses any other chain.
 
 They are **different contract generations**, and the fail-closed gate never accepts one for the other — a `beta` run against the hackathon contracts is refused on its first check, and the reverse likewise.
 
@@ -23,11 +23,11 @@ They are **different contract generations**, and the fail-closed gate never acce
 
 Addresses are never trusted blindly. `mm ensv2 status` re-derives the `.eth` registry from the deployment's own navigation surface and refuses to run if the table disagrees; the resolver factory's clone target, the adapter's implementation (EIP-1967 slot) and the reverse registrar (root → `reverse` TLD resolver → v1 registry) are each re-derived on use.
 
-## `beta` — the canonical ENSv2 Sepolia beta
+## `beta` — the ENSv2 Sepolia beta (currently dead)
 
-The default. Generation **g1**. This is the deployment `mm ensv2` has talked to since v0.1 and the one to use unless you have a reason not to; every command targets it when `--deployment` and `MM_ENSV2_DEPLOYMENT` are unset.
+Generation **g1**. This was the deployment `mm ensv2` talked to by default from v0.1 through v0.8.0. **Dead as of 2026-09-16**: its Universal Resolver was upgraded underneath the same address and no longer answers as ENSv2 under either generation's interface probe — `mm ensv2 status --deployment beta` reports `ENSv2 NOT ACTIVE`. [docs.ens.domains](https://docs.ens.domains/learn/deployments/#sepolia-ensv2-beta) still lists this address as canonical; only the live behavior changed. Select it with `--deployment beta` to re-check.
 
-Chain **11155111**, deployment id `ensv2-sepolia-2026-07-30`, generation **g1** — the default.
+Chain **11155111**, deployment id `ensv2-sepolia-2026-07-30`, generation **g1**.
 
 | Contract | Address | Role |
 |---|---|---|
@@ -49,9 +49,9 @@ Provenance: the official table at [docs.ens.domains/learn/deployments](https://d
 
 ## `hackathon` — ENS Labs' ETHOnline 2026 deployment
 
-ENS Labs' dedicated deployment for the ETHOnline 2026 hackathon, on the same chain but a **newer contract generation (g2)** and an entirely separate namespace: a name registered here does not exist on the beta, and neither do the agents bound to it. Its lifetime is not announced. Select it with `--deployment hackathon`.
+ENS Labs' dedicated deployment for the ETHOnline 2026 hackathon, on the same chain but a **newer contract generation (g2)** and an entirely separate namespace: a name registered here does not exist on `beta`, and neither do the agents bound to it. **The default since 2026-09-16**, because it is the only pinned deployment still passing the gate (`beta` went dead — see above). Its lifetime past the hackathon, and whether it becomes canonical ahead of mainnet, is not announced.
 
-Chain **11155111**, deployment id `ensv2-sepolia-hackathon-2026-09`, generation **g2**.
+Chain **11155111**, deployment id `ensv2-sepolia-hackathon-2026-09`, generation **g2** — the default.
 
 | Contract | Address | Role |
 |---|---|---|
