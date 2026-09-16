@@ -97,16 +97,16 @@ const labels = {
 };
 const notes = {
   beta: {
-    title: "`beta` — the ENSv2 Sepolia beta (currently dead)",
+    title: "`beta` — ENS Labs' canonical Sepolia deployment (table stale)",
     blurb:
-      "Generation **g1**. This was the deployment `mm ensv2` talked to by default from v0.1 through v0.8.0. **Dead as of 2026-09-16**: its Universal Resolver was upgraded underneath the same address and no longer answers as ENSv2 under either generation's interface probe — `mm ensv2 status --deployment beta` reports `ENSv2 NOT ACTIVE`. [docs.ens.domains](https://docs.ens.domains/learn/deployments/#sepolia-ensv2-beta) still lists this address as canonical; only the live behavior changed. Select it with `--deployment beta` to re-check.",
+      "Generation **g1**. This was the deployment `mm ensv2` talked to by default from v0.1 through v0.8.0. **This table went stale on 2026-09-16**: ENS Labs redeployed `beta` on 2026-09-15 to a new, third contract generation — confirmed directly by Kevin at ENS Labs, not a failure — so `mm ensv2 status --deployment beta` now reports `ENSv2 NOT ACTIVE` (the plugin hasn't onboarded the new generation yet). [docs.ens.domains](https://docs.ens.domains/learn/deployments/#sepolia-ensv2-beta) still shows the old table; the new one is recorded on a working, not-yet-merged docs branch: [feature-permres-inode-refact.docs-bao.pages.dev](https://feature-permres-inode-refact.docs-bao.pages.dev/learn/deployments/#sepolia-ensv2-beta). Re-pinning is waiting on that branch to merge.",
     provenance:
       "Provenance: the official table at [docs.ens.domains/learn/deployments](https://docs.ens.domains/learn/deployments/#sepolia-ensv2-beta), the checked-in `deployments/sepolia/*.json` artifacts, the official `ens-cli` table, and live verification. Note that the ENS contracts repo's `contracts/src/` does **not** match these contracts — it describes the g2 generation below.",
   },
   hackathon: {
     title: "`hackathon` — ENS Labs' ETHOnline 2026 deployment",
     blurb:
-      "ENS Labs' dedicated deployment for the ETHOnline 2026 hackathon, on the same chain but a **newer contract generation (g2)** and an entirely separate namespace: a name registered here does not exist on `beta`, and neither do the agents bound to it. **The default since 2026-09-16**, because it is the only pinned deployment still passing the gate (`beta` went dead — see above). Its lifetime past the hackathon, and whether it becomes canonical ahead of mainnet, is not announced.",
+      "ENS Labs' dedicated deployment for the ETHOnline 2026 hackathon, on the same chain but a **newer contract generation (g2)** and an entirely separate namespace: a name registered here does not exist on `beta`, and neither do the agents bound to it. **The default since 2026-09-16**, only because it's the sole pinned table still passing the gate (`beta`'s table went stale — see above) — not because it's canonical. `beta` remains ENS Labs' canonical line.",
     provenance:
       "Provenance: the [ENS deployments page](https://feature-permres-inode-refact.docs-bao.pages.dev/learn/deployments#sepolia-ensv2-beta) section *Sepolia (ENSv2 Beta) – ETHOnline 2026 Hackathon Deployment*, row for row. `resolverProxyLogic` is not on that page — it is the factory's internal clone target, read from `VerifiableFactory.proxyLogic()` and re-verified by the gate on every run. The matching source tree is the ENS contracts repo's `contracts/src/`.",
   },

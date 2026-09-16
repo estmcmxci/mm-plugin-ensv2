@@ -69,18 +69,18 @@ Rules that keep you out of trouble: **never re-send a write because a call faile
 
 Two ENSv2 deployments are pinned, **both on Sepolia (chain 11155111)**. Pick one with `--deployment`, available on every command; `MM_ENSV2_DEPLOYMENT` is the fallback.
 
-**As of 2026-09-16, `hackathon` is the default.** `beta` was the canonical Sepolia beta and the default from launch through v0.8.0, but its Universal Resolver (`0xeEeE…EeEe`) was upgraded underneath the same address and no longer answers as ENSv2 under either generation's interface probe — `mm ensv2 status --deployment beta` now reports `ENSv2 NOT ACTIVE`. docs.ens.domains still lists that address as canonical; only the live behavior changed. Whether ENS Labs restores `beta`, or `hackathon` becomes canonical ahead of mainnet, is an open question out to them.
+**As of 2026-09-16, `hackathon` is the default — but `beta` is still ENS Labs' canonical deployment.** `beta`'s Universal Resolver (`0xeEeE…EeEe`) stopped matching our pinned g1 table because ENS Labs redeployed it on 2026-09-15 to a new (third) contract generation — confirmed directly by Kevin at ENS Labs, not a failure. `mm ensv2 status --deployment beta` reports `ENSv2 NOT ACTIVE` only because this plugin hasn't onboarded that new generation yet, not because `beta` is gone. The new deployment is recorded on a working, not-yet-merged ENS docs branch (docs.ens.domains itself still shows the stale table): https://feature-permres-inode-refact.docs-bao.pages.dev/learn/deployments/#sepolia-ensv2-beta. `hackathon` stays the default until `beta`'s new generation is properly re-pinned, which is waiting on that docs branch to merge.
 
 | | `beta` | `hackathon` *(default)* |
 |---|---|---|
-| What it is | The Sepolia beta `mm ensv2` talked to through v0.1–v0.8.0 — **currently dead**, see above | ENS Labs' dedicated deployment for the **ETHOnline 2026** hackathon |
+| What it is | ENS Labs' canonical Sepolia deployment — redeployed 2026-09-15 to a generation not yet onboarded here, see above | ENS Labs' dedicated deployment for the **ETHOnline 2026** hackathon |
 | Deployment id | `ensv2-sepolia-2026-07-30` | `ensv2-sepolia-hackathon-2026-09` |
-| Contract generation | g1 | **g2 — newer** |
-| Lifetime | dead since 2026-09-16 (address unchanged, implementation upgraded) | not announced; status pending ENS Labs |
-| Use it when | it comes back — check `mm ensv2 status --deployment beta` first | always, for now |
+| Contract generation | g1 (stale — live chain is on a newer, unpinned generation) | **g2** |
+| Lifetime | this table is stale as of 2026-09-16; the deployment itself is ongoing | not announced; status pending ENS Labs |
+| Use it when | not yet — this table doesn't match what's live; use `hackathon` until it's re-pinned | always, for now |
 
 ```bash
-mm ensv2 status --deployment beta       # confirm before relying on it — currently reports NOT ACTIVE
+mm ensv2 status --deployment beta       # confirm before relying on it — currently reports NOT ACTIVE (stale table, not a dead deployment)
 mm ensv2 whois grilledcheese.eth --deployment beta
 export MM_ENSV2_DEPLOYMENT=beta    # …or set it once for the session
 ```
