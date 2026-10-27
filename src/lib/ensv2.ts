@@ -20,8 +20,8 @@
  * internally consistent in both directions — the bidirectional check is what
  * the docs prescribe against aliasing.
  *
- * TWO GENERATIONS, TWO GATES. `deployment.generation` selects which check list
- * runs, and neither list can pass against the other generation's contracts:
+ * THREE GENERATIONS, THREE GATES. `deployment.generation` selects which check
+ * list runs, and no list can pass against another generation's contracts:
  *
  *   g1 (`beta`)      the five checks above, exactly as in v0.7.2.
  *   g2 (`hackathon`) seven checks: the g2 interface id on the UR, an explicit
@@ -30,15 +30,36 @@
  *                    (the g2 UR reverts on it), the same bidirectional
  *                    root/eth checks, the same factory clone-target check, and
  *                    a liveness probe that the UR's findResolver is callable.
+ *   g3 (`sepolia`,   eight checks: `isENSv2()` must answer true, and BOTH
+ *       `mainnet`)   older interface ids must answer false, then the same
+ *                    helper/hierarchy/factory/liveness checks as g2.
  *
- * The cross-generation refusal is not incidental, it is measured: on
+ * Why g3's version probe is `isENSv2()` and not an interface id: the launch
+ * Universal Resolver answers supportsInterface false for 0xf99a5e06 AND for
+ * 0x1a6cc9f0 while answering isENSv2() true (measured on Sepolia and mainnet,
+ * 2026-10-27). It still reports ERC-165 itself (0x01ffc9a7 -> true), so the
+ * false answers are real answers, not a missing function. ensdomains/ens-cli
+ * made the same switch to isENSv2() upstream. Note the irony that 0x1a6cc9f0
+ * IS `isENSv2()`'s selector — on g2 that interface held exactly one function,
+ * so the id and the selector coincided; on g3 the interface grew and the id
+ * moved, while the function stayed.
+ *
+ * The cross-generation refusals are not incidental, they are measured. On
  * 2026-09-04 the beta UR answered supportsInterface(0x1a6cc9f0) == false and
- * the hackathon UR answered supportsInterface(0xf99a5e06) == false, so check 1
- * of each gate rejects the other generation's UR before anything else is read.
+ * the hackathon UR answered supportsInterface(0xf99a5e06) == false. On
+ * 2026-10-27 the launch URs answered false to both, and the hackathon UR still
+ * answered true to 0x1a6cc9f0 — so check 1 or 2 of each gate rejects every
+ * other generation's UR before anything else is read.
+ *
+ * This matters more than it sounds: `beta` and `sepolia` name the SAME
+ * `universalResolver` address. It is an upgradeable proxy, and ENS Labs
+ * upgraded it in place. Asking the chain what it is currently serving, rather
+ * than trusting the address, is the whole reason the g1 table fails closed
+ * instead of transacting against a deployment it no longer describes.
  */
 import { createPublicClient, http, isAddressEqual, zeroAddress, type Address, type PublicClient } from "viem";
-import { registryAbi, universalHelperAbi, universalResolverAbi, verifiableFactoryAbi } from "./abis.js";
-import { SEPOLIA, type EnsV2Deployment } from "./deployments.js";
+import { registryAbi, universalHelperAbi, universalResolverAbi, universalResolverV2ProbeAbi, verifiableFactoryAbi } from "./abis.js";
+import { MAINNET_CHAIN_ID, SEPOLIA_ENSV2, type EnsV2Deployment } from "./deployments.js";
 
 /**
  * IUniversalResolverV2 ERC-165 id on g1 (the `beta` deployment), as probed by
@@ -179,7 +200,14 @@ async function hierarchyAndFactoryChecks(
  * be accepted against the other's contracts (see the module header).
  */
 export async function detectEnsV2(client: ReadClient, deployment: EnsV2Deployment): Promise<EnsV2Detection> {
-  return deployment.generation === "g2" ? detectG2(client, deployment) : detectG1(client, deployment);
+  switch (deployment.generation) {
+    case "g3":
+      return detectG3(client, deployment);
+    case "g2":
+      return detectG2(client, deployment);
+    default:
+      return detectG1(client, deployment);
+  }
 }
 
 /** g1 (`beta`): the original five checks, byte-for-byte the v0.7.2 behaviour and output. */
@@ -319,8 +347,28 @@ async function detectG2(client: ReadClient, deployment: EnsV2Deployment): Promis
   });
   if (!notG1) return refuse("Universal Resolver answers both generations' interface ids");
 
-  // 3. Where does the chain say .eth lives? On g2 that question is answered by
-  //    UniversalHelper — the Universal Resolver reverts on it.
+  return helperGenerationTail(client, deployment, helper, checks, refuse);
+}
+
+/**
+ * The tail both helper-based generations share: checks 3-7 of the g2 gate and
+ * 4-8 of the g3 gate, in that order and under those exact names.
+ *
+ * On g2 and g3 alike, registry navigation answers on the UniversalHelper (the
+ * UR reverts on it) while resolution — findResolver / resolve / reverse —
+ * stays on the UR. Both halves were re-measured on all three g2/g3
+ * deployments on 2026-10-27.
+ */
+async function helperGenerationTail(
+  client: ReadClient,
+  deployment: EnsV2Deployment,
+  helper: Address,
+  checks: Check[],
+  refuse: (reason: string) => EnsV2Detection,
+): Promise<EnsV2Detection> {
+  const ur = deployment.universalResolver;
+
+  // Where does the chain say .eth lives? Answered by UniversalHelper.
   const canon = await tryRead(() =>
     client.readContract({
       address: helper,
@@ -344,13 +392,12 @@ async function detectG2(client: ReadClient, deployment: EnsV2Deployment): Promis
   });
   if (!registryMatches) return refuse("configured .eth registry does not match the UniversalHelper");
 
-  // 4, 5, 6. Registry hierarchy in both directions, and the factory's clone target.
+  // Registry hierarchy in both directions, and the factory's clone target.
   const rest = await hierarchyAndFactoryChecks(client, deployment, ethRegistry, checks);
 
-  // 7. Resolution liveness: the resolver-location call this plugin reads
-  //    through must be callable on the UR itself (it stayed there on g2, while
-  //    the registry-navigation calls moved to the helper). A zero resolver for
-  //    `eth` is a correct answer — the TLD has none — so only a revert fails.
+  // Resolution liveness: the resolver-location call this plugin reads through
+  // must be callable on the UR itself. A zero resolver for `eth` is a correct
+  // answer — the TLD has none — so only a revert fails.
   const findResolver = await tryRead(() =>
     client.readContract({
       address: ur,
@@ -383,14 +430,93 @@ async function detectG2(client: ReadClient, deployment: EnsV2Deployment): Promis
 }
 
 /**
+ * g3 (`sepolia`, `mainnet`): eight checks. The launch Universal Resolver does
+ * not advertise either older interface id, so the version question is put to
+ * `isENSv2()` directly, and both older ids are then asserted ABSENT — the same
+ * un-crossable shape as the g2 gate, one check wider.
+ *
+ * `isENSv2()` must answer the literal `true`. A revert fails (that is what g1
+ * does), and so does any non-true answer.
+ */
+async function detectG3(client: ReadClient, deployment: EnsV2Deployment): Promise<EnsV2Detection> {
+  const checks: Check[] = [];
+  const ur = deployment.universalResolver;
+  const refuse = (reason: string): EnsV2Detection => ({
+    isV2: false,
+    chainId: deployment.chainId,
+    universalResolver: ur,
+    reason,
+    checks,
+  });
+
+  const helper = deployment.universalHelper;
+  if (!helper) {
+    checks.push({
+      name: "deployment table declares a universalHelper",
+      ok: false,
+      expected: "an address",
+      actual: "undefined",
+      detail: "A g3 deployment resolves registry navigation through UniversalHelper; the table is incomplete.",
+    });
+    return refuse("g3 deployment table has no universalHelper");
+  }
+
+  // 1. Is this Universal Resolver serving ENSv2 at all, by its own account?
+  const isV2 = await tryRead(() =>
+    client.readContract({ address: ur, abi: universalResolverV2ProbeAbi, functionName: "isENSv2" }),
+  );
+  const saysV2 = isV2.ok && isV2.value === true;
+  checks.push({
+    name: "universalResolver.isENSv2() == true",
+    ok: saysV2,
+    expected: "true",
+    actual: isV2.ok ? String(isV2.value) : `revert: ${isV2.error}`,
+    detail: saysV2 ? undefined : "The Universal Resolver at this address does not report itself as ENSv2. On g1 this call reverts.",
+  });
+  if (!saysV2) return refuse("Universal Resolver does not report isENSv2()");
+
+  // 2, 3. And is it neither older generation? Never cross-accept. The launch
+  //       UR answers false to both ids while still reporting ERC-165 itself.
+  for (const [id, label] of [
+    [UNIVERSAL_RESOLVER_V2_INTERFACE_ID, "g1"],
+    [UNIVERSAL_RESOLVER_V2_G2_INTERFACE_ID, "g2"],
+  ] as const) {
+    const older = await tryRead(() =>
+      client.readContract({ address: ur, abi: universalResolverAbi, functionName: "supportsInterface", args: [id] }),
+    );
+    const absent = older.ok && older.value === false;
+    checks.push({
+      name: `universalResolver.supportsInterface(${label} IUniversalResolverV2 ${id}) == false`,
+      ok: absent,
+      expected: "false",
+      actual: older.ok ? String(older.value) : `revert: ${older.error}`,
+      detail: absent ? undefined : `This Universal Resolver advertises the ${label} interface id; refusing to treat it as a g3 deployment.`,
+    });
+    if (!absent) return refuse(`Universal Resolver advertises the ${label} interface id`);
+  }
+
+  // 4, 5, 6, 7, 8. Helper navigation, hierarchy both ways, factory, liveness.
+  return helperGenerationTail(client, deployment, helper, checks, refuse);
+}
+
+/**
+ * A public endpoint for a chain, for the standalone runner only. The plugin
+ * proper never picks an endpoint: the host hands it an authenticated client.
+ * ETH_RPC_URL overrides.
+ */
+export function defaultRpcUrl(chainId: number): string {
+  return chainId === MAINNET_CHAIN_ID ? "https://ethereum-rpc.publicnode.com" : "https://ethereum-sepolia-rpc.publicnode.com";
+}
+
+/**
  * Standalone runner: `npm run check`. Exercises `detectEnsV2` against a public
  * Sepolia RPC with a plain viem client, so the detection logic can be verified
  * without installing the plugin into `mm`. The `mm ensv2 status` command runs
  * the identical function against the host-provided client.
  */
 export async function selfCheck(
-  rpcUrl = process.env.ETH_RPC_URL ?? "https://ethereum-sepolia-rpc.publicnode.com",
-  deployment: EnsV2Deployment = SEPOLIA,
+  rpcUrl = process.env.ETH_RPC_URL ?? defaultRpcUrl(SEPOLIA_ENSV2.chainId),
+  deployment: EnsV2Deployment = SEPOLIA_ENSV2,
 ): Promise<void> {
   const client = createPublicClient({ transport: http(rpcUrl) });
   const result = await detectEnsV2(client, deployment);

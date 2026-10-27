@@ -192,7 +192,7 @@ export function buildRegister(d: EnsV2Deployment, p: CommitmentParams): Calldata
   };
 }
 
-/** MockUSDC's open mint. Sepolia beta only; there is no equivalent on a real token. */
+/** MockUSDC's open mint. Sepolia test tokens only; real mainnet USDC has no equivalent, which is why `faucet` is Sepolia-only. */
 export function buildMint(d: EnsV2Deployment, to: Address, amount: bigint): Calldata {
   return { to: d.paymentToken, data: encodeFunctionData({ abi: erc20Abi, functionName: "mint", args: [to, amount] }), value: 0n };
 }

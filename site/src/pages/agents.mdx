@@ -44,7 +44,7 @@ Or run steps 1–6 as one job with `mm ensv2 provision NAME ... --json` and insp
 1. **Never retry a write because a call failed.** A failed call is not a failed transaction. `register` and `provision` checkpoint before they send; run the *same* command again and they re-derive state from chain. If you see `E_RECEIPT_UNAVAILABLE` or `ENSV2_*_UNVERIFIED`, read `mm ensv2 jobs show` or `whois` before anything else.
 2. **Every write is preceded by a plan you can inspect.** `resolver plan`, `provision --dry-run`, `records get`, `primary get`. Use them.
 3. **Idempotent by design.** Re-running any command with the same inputs sends nothing when the chain already matches. You can always re-run to check.
-4. **Mainnet is refused.** Do not try to work around `ENSV2_UNSUPPORTED_CHAIN`.
+4. **Mainnet writes spend real money.** `--deployment mainnet` is live and supported, and registration there costs real USDC. It is never the default: check the `deployment` field in any `--json` output before a write. ERC-8004 agent binding does not exist on chain 1 and refuses with `ENSV2_NO_AGENT_IDENTITY`.
 5. **The commit secret is private.** It lives in a 0600 file under `~/.mm-plugin-ensv2/`. Do not read it, print it, or move it.
 
 ## Identity records you will write and read

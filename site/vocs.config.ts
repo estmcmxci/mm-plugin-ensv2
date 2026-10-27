@@ -9,7 +9,7 @@ export default defineConfig({
   title: 'mm-plugin-ensv2',
   titleTemplate: '%s · mm-plugin-ensv2',
   description:
-    'ENSv2 names and ERC-8004 agent identity for the MetaMask Agent Wallet CLI. Sepolia beta. Fail-closed, key-less, verified live.',
+    'ENSv2 names and ERC-8004 agent identity for the MetaMask Agent Wallet CLI. Mainnet and Sepolia. Fail-closed, key-less, verified live.',
   baseUrl,
   renderStrategy: 'full-static',
   // Links to public/ files (/agents/*.json) and the build-time /llms.txt are outside the page graph.

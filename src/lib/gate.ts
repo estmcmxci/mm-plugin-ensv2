@@ -9,13 +9,18 @@ import type { PublicClient } from "viem";
 import {
   DEFAULT_DEPLOYMENT_KEY,
   DEPLOYMENT_KEYS,
+  MAINNET_CHAIN_ID,
   SEPOLIA_CHAIN_ID,
+  defaultDeploymentForChain,
   deploymentByKey,
   deploymentFor,
   deploymentsOnChain,
+  deploymentsWithAgentIdentity,
+  hasAgentIdentity,
   isDeploymentKey,
   type DeploymentKey,
   type EnsV2Deployment,
+  type EnsV2DeploymentWithIdentity,
 } from "./deployments.js";
 import { detectEnsV2, type EnsV2Detection } from "./ensv2.js";
 import { ReadError } from "./reads.js";
@@ -39,10 +44,13 @@ export function parseChainId(raw: string | undefined): number {
  *
  *   1. the `--deployment` flag
  *   2. the MM_ENSV2_DEPLOYMENT environment variable
- *   3. `beta` — the canonical ENSv2 Sepolia beta, unchanged from v0.7.2
+ *   3. `sepolia` — ENS Labs' canonical ENSv2 testnet deployment
  *
  * An unknown name is a refusal, never a silent fallback to the default: a
- * typo'd `--deployment hackaton` must not quietly transact against the beta.
+ * typo'd `--deployment mainnnet` must not quietly transact anywhere, least of
+ * all somewhere that spends real USDC.
+ *
+ * Prefer `resolveTarget`, which settles the chain and the deployment together.
  */
 export function parseDeploymentKey(raw: string | undefined, env: NodeJS.ProcessEnv = process.env): DeploymentKey {
   return deploymentSelection(raw, env).key;
@@ -70,7 +78,7 @@ function checkedDeploymentKey(value: string, source: string): DeploymentKey {
   throw new CommandError(
     "ENSV2_UNKNOWN_DEPLOYMENT",
     `'${value}' (from ${source}) is not a known ENSv2 deployment.`,
-    `Pass one of: ${DEPLOYMENT_KEYS.join(", ")}. \`beta\` is the canonical Sepolia beta and the default; \`hackathon\` is ENS Labs' dedicated ETHOnline deployment.`,
+    `Pass one of: ${DEPLOYMENT_KEYS.join(", ")}. \`sepolia\` is ENS Labs' canonical testnet deployment and the default; \`mainnet\` is ENSv2 on Ethereum L1 and spends real USDC; \`hackathon\` is the ETHOnline deployment; \`beta\` is the dead original, kept only so old jobs resolve.`,
   );
 }
 
@@ -87,16 +95,27 @@ export function requireDeployment(chainId: number, deploymentKey: DeploymentKey 
     throw new CommandError(
       "ENSV2_UNSUPPORTED_CHAIN",
       `Deployment '${deploymentKey}' is on chain ${known.chainId}, not ${chainId}.`,
-      `Omit --chain (it defaults to ${known.chainId}) or pass --chain ${known.chainId}.`,
+      `Omit --chain — naming a deployment is enough, it implies its own chain — or pass --chain ${known.chainId}.`,
     );
   }
+  throw unsupportedChain(chainId);
+}
+
+/**
+ * "Nothing is pinned for this chain" — the refusal for a chain the plugin has
+ * no table on. Distinct from the cross-chain refusal above, which names a
+ * deployment: when the caller named only a chain, blaming a deployment they
+ * never mentioned (and telling them to drop the flag they did use) sends them
+ * the wrong way entirely.
+ */
+export function unsupportedChain(chainId: number): CommandError {
   const available = deploymentsOnChain(chainId).map((x) => x.key);
-  throw new CommandError(
+  return new CommandError(
     "ENSV2_UNSUPPORTED_CHAIN",
     `No ENSv2 deployment is configured for chain ${chainId}.`,
     available.length
       ? `On this chain the plugin knows: ${available.join(", ")}.`
-      : "ENSv2 is a Sepolia beta (chain 11155111). Mainnet stays disabled until a canonical production deployment exists.",
+      : `The plugin pins ENSv2 on Ethereum mainnet (chain ${MAINNET_CHAIN_ID}) and Sepolia (chain ${SEPOLIA_CHAIN_ID}). No other chain has an ENSv2 deployment to talk to.`,
   );
 }
 
@@ -123,6 +142,85 @@ export async function requireEnsV2(
     );
   }
   return { deployment, detection };
+}
+
+/**
+ * Settle the chain and the deployment together — the one place that decides
+ * what this invocation talks to. Every command calls it with its raw
+ * `--chain` and `--deployment` values.
+ *
+ *   both named      -> both honoured; `requireDeployment` then refuses an
+ *                      incoherent pair rather than preferring one
+ *   deployment only -> the deployment's OWN chain, so `--deployment mainnet`
+ *                      needs no `--chain 1`
+ *   chain only      -> that chain's canonical deployment
+ *                      (`DEFAULT_DEPLOYMENT_FOR_CHAIN`), so `--chain 1` needs
+ *                      no `--deployment mainnet`
+ *   neither         -> `DEFAULT_DEPLOYMENT_KEY` and its chain: Sepolia
+ *
+ * Deliberately not symmetric with a "nearest match": an unknown chain with no
+ * pinned deployment is a refusal, not a silent fallback to Sepolia.
+ */
+export function resolveTarget(
+  chainRaw: string | undefined,
+  deploymentRaw: string | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): { chainId: number; deploymentKey: DeploymentKey; deployment: EnsV2Deployment } {
+  const selection = deploymentSelection(deploymentRaw, env);
+  const chainNamed = chainRaw != null && chainRaw !== "";
+
+  if (!chainNamed) {
+    // A named deployment implies its chain; otherwise the default's chain.
+    const d = deploymentByKey(selection.key)!;
+    return { chainId: d.chainId, deploymentKey: d.key, deployment: d };
+  }
+
+  const chainId = parseChainId(chainRaw);
+  if (!selection.explicit) {
+    const canonical = defaultDeploymentForChain(chainId);
+    if (canonical) return { chainId, deploymentKey: canonical.key, deployment: canonical };
+    // Only a chain was named, and nothing is pinned on it. Refuse for THAT
+    // reason: `requireDeployment` would name the default deployment and tell
+    // the caller to drop the one flag they actually passed.
+    throw unsupportedChain(chainId);
+  }
+  return { chainId, deploymentKey: selection.key, deployment: requireDeployment(chainId, selection.key) };
+}
+
+/**
+ * Narrow to a deployment that can actually mint and bind an ERC-8004 agent, or
+ * refuse by name.
+ *
+ * Mainnet pins no Adapter8004 — unruggable-labs has not deployed it to chain 1
+ * (checked 2026-10-27) — so `agent register`, `agent info` and `agent set-uri`
+ * have nothing to call there. Refusing with the reason beats carrying a zero
+ * address into a mint.
+ */
+export function requireAgentIdentity(d: EnsV2Deployment): EnsV2DeploymentWithIdentity {
+  if (hasAgentIdentity(d)) return d;
+  const elsewhere = deploymentsWithAgentIdentity().map((x) => x.key);
+  throw new CommandError(
+    "ENSV2_NO_AGENT_IDENTITY",
+    `Deployment '${d.key}' (chain ${d.chainId}) has no Adapter8004, so an ERC-8004 agent cannot be minted, bound or inspected there.`,
+    elsewhere.length
+      ? `Agent identity works on: ${elsewhere.join(", ")}. Everything else about this deployment — names, records, resolvers, primary names — works normally.`
+      : "No pinned deployment has the adapter.",
+  );
+}
+
+/**
+ * The deployment's canonical ERC-8004 IdentityRegistry, or a refusal. This is
+ * a weaker requirement than `requireAgentIdentity`: the registry is live on
+ * mainnet even though the binding adapter is not, so ENSIP-25 record keys
+ * derive and read on chain 1.
+ */
+export function requireIdentityRegistry(d: EnsV2Deployment): `0x${string}` {
+  if (d.identityRegistry) return d.identityRegistry;
+  throw new CommandError(
+    "ENSV2_NO_IDENTITY_REGISTRY",
+    `Deployment '${d.key}' (chain ${d.chainId}) pins no ERC-8004 identity registry.`,
+    "An ENSIP-25 agent-registration key is derived from that registry's address; there is nothing to derive it from here.",
+  );
 }
 
 export function toCommandError(error: unknown): CommandError {

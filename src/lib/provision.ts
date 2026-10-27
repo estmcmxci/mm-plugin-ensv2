@@ -33,7 +33,7 @@ import { labelhash, namehash } from "viem/ens";
 import { TOKEN_STANDARD, adapter8004Abi } from "./abis.js";
 import { agentIdFromReceipt } from "./agent.js";
 import type { ProvisionChain, ReceiptLite } from "./chain.js";
-import type { EnsV2Deployment } from "./deployments.js";
+import { hasAgentIdentity, type EnsV2Deployment } from "./deployments.js";
 import { ensip25Key } from "./erc7930.js";
 import { classifyReturned, classifyThrown, type SubmitOutcome, type SubmitResult } from "./executor.js";
 import { buildIntent, intentIsConsistent, jobIdFor, withMaxSpend, type BuildIntentInput, type IntentRecord, type ProvisioningIntent } from "./intent.js";
@@ -281,6 +281,12 @@ async function planProvisionInner(deps: Pick<EngineDeps, "chain" | "deployment" 
   if (req.identity) {
     if (!/^(https?:\/\/|ipfs:\/\/)\S+$/i.test(req.identity.agentUri)) {
       halt({ code: "E_NAME_INVALID", category: "validation", retryability: "terminal", message: `'${req.identity.agentUri}' is not an http(s):// or ipfs:// agentURI.`, recoveryAction: { kind: "none", description: "Pass --agent-uri with the URI of the agent's ERC-8004 registration JSON, or --no-identity." } }, "terminal_failed");
+    }
+    // No Adapter8004 on this deployment at all — mainnet, as of 2026-10-27 —
+    // means nothing can be minted or bound here. Refuse before any RPC rather
+    // than carrying a zero address into a mint.
+    if (!hasAgentIdentity(d)) {
+      halt({ code: "E_IDENTITY_ADAPTER_UNAVAILABLE", category: "identity", retryability: "requires_user_action", message: `Deployment ${d.deploymentId} (chain ${d.chainId}) has no Adapter8004; an ERC-8004 agent cannot be bound there.`, recoveryAction: { kind: "manual_intervention", description: "Provision on a deployment that has the adapter, or run with --no-identity." } }, "terminal_failed");
     }
     const impl = await deps.chain.adapterImplementation();
     if (isAddressEqual(impl, zeroAddress)) {
@@ -1231,7 +1237,7 @@ export async function runJob(deps: EngineDeps, file: JobFile, opts: RunOptions =
             return { calldata: { to: ic.adapterProxy, data, value: 0n }, summary: `Mint an ERC-8004 agent bound to ${rt.name}`, details: { adapter: ic.adapterProxy, name: rt.name, tokenId: `0x${tokenId.toString(16)}`, agentURI: ic.agentUri } };
           },
           confirm: async (receipt) => {
-            const id = agentIdFromReceipt(receipt, d.adapter8004);
+            const id = agentIdFromReceipt(receipt, intent.identityConfig!.adapterProxy);
             if (id === null) halt({ code: "E_VERIFICATION_MISMATCH", category: "identity", retryability: "terminal", message: "the bind transaction succeeded but emitted no AgentBound event", source: "verifier", recoveryAction: { kind: "manual_intervention", description: "Report this with the transaction hash." } }, "terminal_failed");
             const info = await chain.agentInfo(rt.name, id);
             if (info.status !== "bound" || !info.registryMatches || !info.nftHeldByAdapter) {
@@ -1251,7 +1257,8 @@ export async function runJob(deps: EngineDeps, file: JobFile, opts: RunOptions =
           if (info.status !== "bound" || !info.registryMatches) halt({ code: "E_IDENTITY_BINDING_FAILED", category: "identity", retryability: "terminal", message: `Agent #${id} is ${info.status} on the adapter.`, source: "verifier", recoveryAction: { kind: "manual_intervention", description: "Report this." } }, "terminal_failed");
           if (!info.ownerIsController) halt({ code: "E_IDENTITY_BINDING_FAILED", category: "identity", retryability: "terminal", message: `The adapter does not report ${rt.owner} as controller of agent #${id}.`, source: "verifier", recoveryAction: { kind: "manual_intervention", description: "Report this." } }, "terminal_failed");
           const meta = await chain.bindingMetadata(id);
-          if (!meta || !isAddressEqual(meta, d.adapter8004)) halt({ code: "E_IDENTITY_METADATA_FAILED", category: "identity", retryability: "terminal", message: `The ERC-8004 registry's agent-binding metadata for #${id} is ${meta ?? "empty"}, not the adapter ${d.adapter8004}.`, source: "verifier", recoveryAction: { kind: "manual_intervention", description: "The identity is discoverable as pointing at a different binding contract. Report this." } }, "terminal_failed");
+          const adapter = intent.identityConfig!.adapterProxy;
+          if (!meta || !isAddressEqual(meta, adapter)) halt({ code: "E_IDENTITY_METADATA_FAILED", category: "identity", retryability: "terminal", message: `The ERC-8004 registry's agent-binding metadata for #${id} is ${meta ?? "empty"}, not the adapter ${adapter}.`, source: "verifier", recoveryAction: { kind: "manual_intervention", description: "The identity is discoverable as pointing at a different binding contract. Report this." } }, "terminal_failed");
           job.outcome = { ...(job.outcome ?? {}), identity: "succeeded" };
           upsertStep(job, name, { attempts: (findStep(job, name)?.attempts ?? 0) + 1 });
           await rt.markStep(name, "succeeded", `agent #${id} bound, controller ok, binding metadata ok`);
@@ -1338,7 +1345,7 @@ export function desiredRecords(file: JobFile, d: EnsV2Deployment): DesiredRecord
     else if (r.kind === "text") out.texts[r.key] = r.value;
   }
   if (file.intent.identity === "erc8004" && file.intent.identityConfig?.publishEnsipRecords && file.job.facts.erc8004AgentId) {
-    out.texts[ensip25Key(d.chainId, d.identityRegistry, file.job.facts.erc8004AgentId)] = "1";
+    out.texts[ensip25Key(d.chainId, file.intent.identityConfig.erc8004Registry, file.job.facts.erc8004AgentId)] = "1";
   }
   return out;
 }
@@ -1533,7 +1540,7 @@ export async function verifyProvisioning(chains: [ProvisionChain, ProvisionChain
       check("identity-bound", "an ERC-8004 agent is bound to the name's token on the adapter", true, bound);
       check("bound-token-is-current", "the bound token id equals the name's current token id", e.identity.currentTokenId, e.identity.boundTokenId);
       check("identity-controller", "the owner controls the agent through the binding", true, e.identity.controller);
-      check("binding-metadata-matches", "ERC-8004 agent-binding metadata points at the adapter", d.adapter8004, e.identity.metadata);
+      check("binding-metadata-matches", "ERC-8004 agent-binding metadata points at the adapter", ic.adapterProxy, e.identity.metadata);
       check("ensip25-link", "the ENSIP-25 agent-registration record is published on the name", true, e.identity.ensip25 === true);
       identity = {
         requested: "erc8004",
@@ -1552,7 +1559,7 @@ export async function verifyProvisioning(chains: [ProvisionChain, ProvisionChain
               bindingStandard: "erc721",
               bindingStandardId: e.identity.standard,
               ...(e.identity.metadata ? { bindingMetadataAddress: e.identity.metadata } : {}),
-              bindingMetadataMatches: !!e.identity.metadata && isAddressEqual(e.identity.metadata, d.adapter8004),
+              bindingMetadataMatches: !!e.identity.metadata && isAddressEqual(e.identity.metadata, ic.adapterProxy),
             }
           : {}),
       };

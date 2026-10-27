@@ -26,7 +26,7 @@ for (const c of cmds) {
   (topics[topic] ??= []).push(c);
 }
 let md = `---\ntitle: Commands\ndescription: "Every mm ensv2 command, generated from the plugin's oclif manifest (${cmds.length} commands, v${pkg.version})."\n---\n\n` + banner("oclif.manifest.json + package.json#mm") + `\n# Commands\n\n`;
-md += `Generated from the plugin's own \`oclif.manifest.json\` at version **${pkg.version}** — ${cmds.length} commands. Every command accepts \`--json\` for machine-readable output and \`--chain <id>\` (default 11155111, Sepolia; anything else is refused).\n\n`;
+md += `Generated from the plugin's own \`oclif.manifest.json\` at version **${pkg.version}** — ${cmds.length} commands. Every command accepts \`--json\` for machine-readable output, \`--deployment\` and \`--chain <id>\` (1 for Ethereum mainnet or 11155111 for Sepolia, default 11155111; any other chain is refused). Naming a deployment implies its chain. The four \`agent *\` and \`faucet\` commands are Sepolia-only and declare it in the manifest.\n\n`;
 md += `| Command | Capabilities | What it does |\n|---|---|---|\n`;
 for (const c of cmds) {
   const inv = "mm " + c.id.replace(/:/g, " ");
@@ -80,64 +80,95 @@ writeFileSync(join(out, "errors.mdx"), em);
 // ---------- deployment table (one section per pinned deployment)
 const { DEPLOYMENTS, DEPLOYMENT_KEYS, DEFAULT_DEPLOYMENT_KEY } = await import(join(root, "dist", "lib", "deployments.js"));
 const labels = {
-  universalResolver: (d) => `Universal Resolver (proxy) — public entry point${d.generation === "g2" ? "; resolution only on this generation" : "; resolution and registry navigation"}`,
-  universalHelper: "UniversalHelper — registry navigation on g2 (the g2 Universal Resolver reverts on these calls)",
+  universalResolver: (d) => `Universal Resolver (proxy) — public entry point${d.generation === "g1" ? "; resolution and registry navigation" : "; resolution only on this generation"}`,
+  universalHelper: "UniversalHelper — registry navigation on g2/g3 (those Universal Resolvers revert on these calls)",
   rootRegistry: "Root registry — top of the v2 hierarchy",
   registry: ".eth registry (PermissionedRegistry) — where 2LDs live",
   registrar: "ETH registrar — commit/reveal registration, ERC-20 payment",
   rentPriceOracle: "Rent price oracle",
-  paymentToken: "MockUSDC — the deployment's payment token (open faucet)",
+  paymentToken: (d) => (d.chainId === 1 ? "**Real USDC** — 6 decimals. Registration here spends actual money; there is no faucet." : "MockUSDC — the deployment's test payment token (open faucet)"),
   resolverFactory: "VerifiableFactory — deploys and attests per-wallet resolvers",
   resolverImplementation: "PermissionedResolver implementation",
   resolverProxyLogic: "Factory clone target (ERC-1167 proxy logic)",
   subregistryImplementation: "UserRegistry implementation",
-  adapter8004: "Adapter8004 proxy (unruggable-labs/adapter) — mints + binds ERC-8004 agents. Deployment-independent.",
-  identityRegistry: "ERC-8004 IdentityRegistry (canonical Sepolia). Deployment-independent.",
+  adapter8004: "Adapter8004 proxy (unruggable-labs/adapter) — mints + binds ERC-8004 agents. The same contract wherever it is deployed.",
+  identityRegistry: "ERC-8004 IdentityRegistry — the canonical one, at the same address and behind the same implementation on both chains.",
   reverseRegistrar: "v1 ReverseRegistrar — owner of addr.reverse in the v1 registry this deployment mirrors",
 };
 const notes = {
-  beta: {
-    title: "`beta` — ENS Labs' canonical Sepolia deployment (table stale)",
+  sepolia: {
+    title: "`sepolia` — ENS Labs' canonical ENSv2 testnet deployment",
     blurb:
-      "Generation **g1**. This was the deployment `mm ensv2` talked to by default from v0.1 through v0.8.0. **This table went stale on 2026-09-16**: ENS Labs redeployed `beta` on 2026-09-15 to a new, third contract generation — confirmed directly by Kevin at ENS Labs, not a failure — so `mm ensv2 status --deployment beta` now reports `ENSv2 NOT ACTIVE` (the plugin hasn't onboarded the new generation yet). [docs.ens.domains](https://docs.ens.domains/learn/deployments/#sepolia-ensv2-beta) still shows the old table; the new one is recorded on a working, not-yet-merged docs branch: [feature-permres-inode-refact.docs-bao.pages.dev](https://feature-permres-inode-refact.docs-bao.pages.dev/learn/deployments/#sepolia-ensv2-beta). Re-pinning is waiting on that branch to merge.",
+      "Generation **g3**, and the default. This is the *Sepolia (ENSv2)* table on docs.ens.domains — the line ENS Labs carries forward. It replaced the `beta` table below, with which it shares its `universalResolver` **address**: that address is an upgradeable proxy, and ENS Labs upgraded it in place, which is exactly why the gate asks the chain what it is currently serving rather than trusting the address.",
     provenance:
-      "Provenance: the official table at [docs.ens.domains/learn/deployments](https://docs.ens.domains/learn/deployments/#sepolia-ensv2-beta), the checked-in `deployments/sepolia/*.json` artifacts, the official `ens-cli` table, and live verification. Note that the ENS contracts repo's `contracts/src/` does **not** match these contracts — it describes the g2 generation below.",
+      "Provenance: the *Sepolia (ENSv2)* table at [docs.ens.domains/learn/deployments](https://docs.ens.domains/learn/deployments), row for row, agreed independently by [`ensdomains/ensjs`](https://github.com/ensdomains/ensjs/blob/main/packages/ensjs/src/clients/chain.ts) on every address pinned here. `resolverProxyLogic` is on neither — it is the factory's internal clone target, read from `VerifiableFactory.proxyLogic()` and re-verified by the gate on every run. Every derivable value was re-derived live on 2026-10-27.",
+  },
+  mainnet: {
+    title: "`mainnet` — ENSv2 on Ethereum L1",
+    blurb:
+      "Generation **g3**, chain **1**. ENSv2 went live on mainnet on 2026-10-27; Namechain was cancelled in February 2026 and ENSv2 shipped on L1 instead. Live and serving: `isENSv2()` is true, the registry hierarchy is consistent in both directions, migrated names answer from the v2 `.eth` registry and unmigrated ones fall through to `ENSV1Resolver`. **Registration spends real USDC or DAI** — about $8.00 a year for a free label. There is **no `Adapter8004` on chain 1**, so ERC-8004 agents cannot be minted or bound here and the `agent *` commands refuse by name; the canonical ERC-8004 registry itself *is* live, so ENSIP-25 records still derive and read.",
+    provenance:
+      "Provenance: the *Mainnet (ENSv2)* table at [docs.ens.domains/learn/deployments](https://docs.ens.domains/learn/deployments), row for row, agreed independently by [`ensdomains/ensjs`](https://github.com/ensdomains/ensjs/blob/main/packages/ensjs/src/clients/chain.ts). Where sources disagree, the table follows the two that agree: `ens-cli` records a different `subregistryImplementation` (`0x75FF9AdB…`), a field this plugin reads nowhere. Every derivable value was re-derived live on 2026-10-27 at block 26285436.",
   },
   hackathon: {
     title: "`hackathon` — ENS Labs' ETHOnline 2026 deployment",
     blurb:
-      "ENS Labs' dedicated deployment for the ETHOnline 2026 hackathon, on the same chain but a **newer contract generation (g2)** and an entirely separate namespace: a name registered here does not exist on `beta`, and neither do the agents bound to it. **The default since 2026-09-16**, only because it's the sole pinned table still passing the gate (`beta`'s table went stale — see above) — not because it's canonical. `beta` remains ENS Labs' canonical line.",
+      "Generation **g2**: ENS Labs' dedicated deployment for the ETHOnline 2026 hackathon, and an entirely separate namespace — a name registered here does not exist on the canonical table, and neither do the agents bound to it. Still live, and all seven of its gate checks passed again on 2026-10-27. It was the default in v0.8.1, when the `beta` table went stale and this was the only pinned table still passing; `sepolia` has that role now.",
     provenance:
-      "Provenance: the [ENS deployments page](https://feature-permres-inode-refact.docs-bao.pages.dev/learn/deployments#sepolia-ensv2-beta) section *Sepolia (ENSv2 Beta) – ETHOnline 2026 Hackathon Deployment*, row for row. `resolverProxyLogic` is not on that page — it is the factory's internal clone target, read from `VerifiableFactory.proxyLogic()` and re-verified by the gate on every run. The matching source tree is the ENS contracts repo's `contracts/src/`.",
+      "Provenance: the ETHOnline deployments page section *Sepolia (ENSv2 Beta) – ETHOnline 2026 Hackathon Deployment*, row for row, derived live on 2026-09-04 and re-verified 2026-10-27. `resolverProxyLogic` is not on that page — it is the factory's internal clone target, read from `VerifiableFactory.proxyLogic()`.",
+  },
+  beta: {
+    title: "`beta` — the original ENSv2 Sepolia beta (dead)",
+    blurb:
+      "Generation **g1**, and **dead**. This was the default from v0.1 through v0.8.0. ENS Labs upgraded the proxy at its `universalResolver` out from under this table — to a third generation on 2026-09-15, and again at launch — so that address now serves `sepolia` above and the rest of these addresses are orphaned. `mm ensv2 status --deployment beta` reports `ENSv2 NOT ACTIVE`, which is the gate working rather than something to fix. The table stays pinned, addresses unchanged from v0.7.2, so a job or receipt written against `ensv2-sepolia-2026-07-30` still resolves the table it was made under.",
+    provenance:
+      "Provenance: the then-official ENS deployment table, the checked-in `deployments/sepolia/*.json` artifacts, and `ens-cli` @ 256cc45, all cross-checked and verified live in September 2026. All three sources have since moved on; this is kept as the historical record.",
   },
 };
 
-let dm = `---\ntitle: Deployment table\ndescription: "The two pinned ENSv2 Sepolia deployments the plugin talks to, and how each address is re-verified at runtime."\n---\n\n` + banner("dist/lib/deployments.js");
-dm += `\n# Deployment table\n\nThe plugin pins **${DEPLOYMENT_KEYS.length} deployments**, both on chain **11155111** (Sepolia), selected with \`--deployment <${DEPLOYMENT_KEYS.join("|")}>\` (or \`MM_ENSV2_DEPLOYMENT\`; default \`${DEFAULT_DEPLOYMENT_KEY}\`). Mainnet is deliberately absent: ENSv2 is a beta with non-final interfaces, and the plugin refuses any other chain.\n\n`;
-dm += `They are **different contract generations**, and the fail-closed gate never accepts one for the other — a \`beta\` run against the hackathon contracts is refused on its first check, and the reverse likewise.\n\n`;
-dm += `| Concern | g1 (\`beta\`) | g2 (\`hackathon\`) |\n|---|---|---|\n`;
-dm += `| \`IUniversalResolverV2\` id | \`0xf99a5e06\` | \`0x1a6cc9f0\` |\n`;
-dm += `| \`isENSv2()\` | reverts | returns \`true\` |\n`;
-dm += `| registry navigation | on the Universal Resolver | on a separate \`UniversalHelper\` |\n`;
-dm += `| resolver record setters | \`setAddr\`/\`setText(bytes32 node, …)\` | \`setAddress\`/\`setText(bytes dnsName, …)\` |\n`;
-dm += `| resolver initializer | \`initialize(address,uint256,bytes[])\` | \`initialize(Grant[],bytes[])\` |\n`;
-dm += `| forward + reverse resolution | \`findResolver\` / \`resolve\` / \`reverse\` on the UR | identical |\n`;
-dm += `| ERC-8004 adapter + registry | same contracts | same contracts |\n\n`;
-dm += `Addresses are never trusted blindly. \`mm ensv2 status\` re-derives the \`.eth\` registry from the deployment's own navigation surface and refuses to run if the table disagrees; the resolver factory's clone target, the adapter's implementation (EIP-1967 slot) and the reverse registrar (root → \`reverse\` TLD resolver → v1 registry) are each re-derived on use.\n`;
+const chains = { 1: { name: "Ethereum mainnet", explorer: "https://etherscan.io" }, 11155111: { name: "Sepolia", explorer: "https://sepolia.etherscan.io" } };
+const chainIds = [...new Set(DEPLOYMENT_KEYS.map((k) => DEPLOYMENTS[k].chainId))];
+
+let dm = `---\ntitle: Deployment table\ndescription: "The four pinned ENSv2 deployments the plugin talks to — mainnet and Sepolia — and how each address is re-verified at runtime."\n---\n\n` + banner("dist/lib/deployments.js");
+dm += `\n# Deployment table\n\nThe plugin pins **${DEPLOYMENT_KEYS.length} deployments** across ${chainIds.length} chains — ${chainIds.map((c) => `**${chains[c]?.name ?? c}** (${c})`).join(" and ")} — selected with \`--deployment <${DEPLOYMENT_KEYS.join("|")}>\` (or \`MM_ENSV2_DEPLOYMENT\`; default \`${DEFAULT_DEPLOYMENT_KEY}\`). Naming a deployment implies its chain and naming a chain implies that chain's canonical deployment, so neither flag needs the other; an incoherent pair is refused. Any chain without a pinned deployment is refused rather than guessed at.\n\n`;
+dm += `The default is a **testnet** deliberately. Mainnet is pinned and fully supported, but spending real USDC is something you ask for with \`--deployment mainnet\`, never something you get by omission.\n\n`;
+dm += `## Three generations, three gates\n\nThe tables span **three contract generations**, and the fail-closed gate never accepts one against another's contracts — each gate asserts the other generations' markers ABSENT, not merely its own present.\n\n`;
+dm += `| Concern | g1 (\`beta\`) | g2 (\`hackathon\`) | g3 (\`sepolia\`, \`mainnet\`) |\n|---|---|---|---|\n`;
+dm += `| version probe | \`supportsInterface(0xf99a5e06)\` | \`supportsInterface(0x1a6cc9f0)\` | **\`isENSv2()\`; both ids \`false\`** |\n`;
+dm += `| \`isENSv2()\` | reverts | returns \`true\` | returns \`true\` |\n`;
+dm += `| registry navigation | on the Universal Resolver | on a separate \`UniversalHelper\` | same as g2 |\n`;
+dm += `| resolver record setters | \`setAddr\`/\`setText(bytes32 node, …)\` | \`setAddress\`/\`setText(bytes dnsName, …)\` | same as g2 |\n`;
+dm += `| resolver initializer | \`initialize(address,uint256,bytes[])\` | \`initialize(Grant[],bytes[])\` | same as g2 |\n`;
+dm += `| forward + reverse resolution | \`findResolver\` / \`resolve\` / \`reverse\` on the UR | identical | identical |\n`;
+dm += `| ERC-8004 binding | yes | yes | Sepolia only — no adapter on chain 1 |\n\n`;
+dm += `**g3 is g2's contracts.** The deployed bytecode was compared selector by selector on 2026-10-27: \`ETHRegistrar\` is the same 8037 bytes with the same entry points on all three g2/g3 deployments, \`PermissionedResolverImpl\` exposes exactly the same setters and initializer, \`VerifiableFactory\` and \`ETHRegistry\` match to the byte. One set of encoders serves both; g3 is a separate generation only because its Universal Resolver stopped advertising the g2 ERC-165 id while still answering \`isENSv2()\`.\n\n`;
+dm += `Addresses are never trusted blindly. \`mm ensv2 status\` re-derives the \`.eth\` registry from the deployment's own navigation surface and refuses to run if the table disagrees; the resolver factory's clone target, the adapter's implementation (EIP-1967 slot) and the reverse registrar (root → \`reverse\` TLD resolver → v1 registry → \`owner(addr.reverse)\`) are each re-derived on use.\n`;
 
 let fieldCount = 0;
 for (const key of DEPLOYMENT_KEYS) {
   const d = DEPLOYMENTS[key];
   const n = notes[key] ?? { title: `\`${key}\``, blurb: "", provenance: "" };
-  dm += `\n## ${n.title}\n\n${n.blurb}\n\nChain **${d.chainId}**, deployment id \`${d.deploymentId}\`, generation **${d.generation}**${key === DEFAULT_DEPLOYMENT_KEY ? " — the default" : ""}.\n\n`;
+  const explorer = chains[d.chainId]?.explorer ?? "https://etherscan.io";
+  dm += `\n## ${n.title}\n\n${n.blurb}\n\nChain **${d.chainId}** (${chains[d.chainId]?.name ?? "unknown"}), deployment id \`${d.deploymentId}\`, generation **${d.generation}**${key === DEFAULT_DEPLOYMENT_KEY ? " — the default" : ""}.\n\n`;
   dm += `| Contract | Address | Role |\n|---|---|---|\n`;
   for (const [k, v] of Object.entries(d)) {
     if (typeof v !== "string" || !v.startsWith("0x")) continue;
     fieldCount += 1;
-    const label = labels[k]; dm += `| \`${k}\` | [\`${v}\`](https://sepolia.etherscan.io/address/${v}) | ${typeof label === "function" ? label(d) : (label ?? "")} |\n`;
+    const label = labels[k];
+    dm += `| \`${k}\` | [\`${v}\`](${explorer}/address/${v}) | ${typeof label === "function" ? label(d) : (label ?? "")} |\n`;
+  }
+  // Absent fields are load-bearing: say so rather than leaving a silent gap.
+  for (const k of ["universalHelper", "adapter8004", "identityRegistry"]) {
+    if (d[k] == null) {
+      const why =
+        k === "universalHelper"
+          ? "**absent** — on g1 the Universal Resolver answers registry navigation itself"
+          : "**absent** — not deployed on this chain, so the commands that need it refuse by name";
+      dm += `| \`${k}\` | — | ${why} |\n`;
+    }
   }
   dm += `\n${n.provenance}\n`;
 }
-dm += `\n## Names and agents are per deployment\n\nA registration, a resolver, a primary name and an ERC-8004 binding all belong to the deployment they were made on. \`mm ensv2 whois agent.eth\` and \`mm ensv2 whois agent.eth --deployment hackathon\` are two different questions with two different answers, and a provisioning job created under one deployment refuses to resume under the other (\`E_UNSUPPORTED_DEPLOYMENT\`).\n`;
+dm += `\n## Names and agents are per deployment\n\nA registration, a resolver, a primary name and an ERC-8004 binding all belong to the deployment they were made on. \`mm ensv2 whois agent.eth\` and \`mm ensv2 whois agent.eth --deployment mainnet\` are two different questions with two different answers, and a provisioning job created under one deployment refuses to resume under another (\`E_UNSUPPORTED_DEPLOYMENT\`).\n`;
 writeFileSync(join(out, "deployment.mdx"), dm);
 console.log(`generated: ${cmds.length} commands, ${codes.size} error codes, ${DEPLOYMENT_KEYS.length} deployments / ${fieldCount} address fields`);

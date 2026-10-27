@@ -11,7 +11,7 @@ import { readFileSync } from "node:fs";
 import { isAddressEqual, parseUnits } from "viem";
 import { erc20Abi } from "../../lib/abis.js";
 import { viemProvisionChain } from "../../lib/chain.js";
-import { parseChainId, parseDeploymentKey, requireEnsV2 } from "../../lib/gate.js";
+import { resolveTarget, requireEnsV2 } from "../../lib/gate.js";
 import { defaultStore, engineDeps, jobErrorToCommandError, programErrorToCommandError, summarize, type JobSummary } from "../../lib/hostjobs.js";
 import type { JobRecord } from "../../lib/jobs.js";
 import { ethLabel } from "../../lib/names.js";
@@ -38,8 +38,8 @@ const inputs = {
   maxSpend: t("max-spend", "Spend ceiling in payment-token units (e.g. 8.5); default: the registrar's quote"),
   resubmitUnconfirmed: b("resubmit-unconfirmed", "You have confirmed a step recorded as submitted never landed and is not pending; allow it to be sent again"),
   verifyRpc: t("verify-rpc", "Second, independent RPC URL for the final verification (default: MM_ENSV2_VERIFY_RPC or publicnode)"),
-  chain: t("chain", "EVM chain id (default 11155111, Sepolia)"),
-  deployment: t("deployment", "ENSv2 deployment: beta (default, the canonical Sepolia beta) or hackathon (ENS Labs' ETHOnline deployment, a newer contract generation)"),
+  chain: t("chain", "EVM chain id (default 11155111, Sepolia; 1 for Ethereum mainnet — or just name the deployment, which implies its chain)"),
+  deployment: t("deployment", "ENSv2 deployment: sepolia (default, ENS Labs' canonical testnet), mainnet (Ethereum L1 — spends real USDC), hackathon (the ETHOnline 2026 deployment), beta (dead, kept only so old jobs resolve)"),
 } satisfies InputSchema;
 
 export type ProvisionResult = {
@@ -101,8 +101,7 @@ export default class EnsV2Provision extends PluginCommand<ProvisionResult | Prov
 
   async execute(io: CommandIO): Promise<ProvisionResult | ProvisionDryRun> {
     const v = await io.resolveInputs(inputs);
-    const chainId = parseChainId(v.chain);
-    const deploymentKey = parseDeploymentKey(v.deployment);
+    const { chainId, deploymentKey } = resolveTarget(v.chain, v.deployment);
     const client = this.ctx.publicClient(chainId);
     const store = defaultStore();
 

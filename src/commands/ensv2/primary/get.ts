@@ -8,14 +8,14 @@ import {
   schemaToFlags,
 } from "@metamask/agent-wallet/plugin";
 import { isAddress } from "viem";
-import { parseChainId, parseDeploymentKey, requireEnsV2, toCommandError } from "../../../lib/gate.js";
+import { resolveTarget, requireEnsV2, toCommandError } from "../../../lib/gate.js";
 import { primaryStatus, type PrimaryStatus } from "../../../lib/primary.js";
 import { selectedEvmAddress } from "../../../lib/wallet.js";
 
 const inputs = {
   address: { type: InputFieldType.Text, flag: "address", message: "0x address to inspect (default: this wallet)", required: false, prompt: false, index: 0 },
-  chain: { type: InputFieldType.Text, flag: "chain", message: "EVM chain id (default 11155111, Sepolia)", required: false, prompt: false },
-  deployment: { type: InputFieldType.Text, flag: "deployment", message: "ENSv2 deployment: beta (default, the canonical Sepolia beta) or hackathon (ENS Labs' ETHOnline deployment, a newer contract generation)", required: false, prompt: false },
+  chain: { type: InputFieldType.Text, flag: "chain", message: "EVM chain id (default 11155111, Sepolia; 1 for Ethereum mainnet — or just name the deployment, which implies its chain)", required: false, prompt: false },
+  deployment: { type: InputFieldType.Text, flag: "deployment", message: "ENSv2 deployment: sepolia (default, ENS Labs' canonical testnet), mainnet (Ethereum L1 — spends real USDC), hackathon (the ETHOnline 2026 deployment), beta (dead, kept only so old jobs resolve)", required: false, prompt: false },
 } satisfies InputSchema;
 
 /**
@@ -37,8 +37,7 @@ export default class EnsV2PrimaryGet extends PluginCommand<PrimaryStatus> {
 
   async execute(io: CommandIO): Promise<PrimaryStatus> {
     const v = await io.resolveInputs(inputs);
-    const chainId = parseChainId(v.chain);
-    const deploymentKey = parseDeploymentKey(v.deployment);
+    const { chainId, deploymentKey } = resolveTarget(v.chain, v.deployment);
     const client = this.ctx.publicClient(chainId);
     try {
       const { deployment } = await requireEnsV2(client, chainId, deploymentKey);

@@ -28,7 +28,7 @@
 import { encodeFunctionData, getAddress, isAddress, isAddressEqual, zeroAddress, type Address, type Hex, type PublicClient } from "viem";
 import { namehash } from "viem/ens";
 import { permissionedResolverG2Abi, resolverAbi } from "./abis.js";
-import type { EnsV2Deployment } from "./deployments.js";
+import { contractSurface, type EnsV2Deployment } from "./deployments.js";
 import { ensip25Key, parseEnsip25Key, type Ensip25Ref } from "./erc7930.js";
 import { dnsEncode, normalizeName } from "./names.js";
 import { ReadError, ensClient, resolverInfo } from "./reads.js";
@@ -156,10 +156,16 @@ export async function readRecordSet(
     }
   }
   const links: RecordSet["links"] = [];
-  for (const id of ids) {
-    const key = ensip25Key(d.chainId, registry, id);
-    const ref = parseEnsip25Key(key)!;
-    links.push({ ...ref, read: await readText(ens, d, name, key) });
+  if (registry) {
+    for (const id of ids) {
+      const key = ensip25Key(d.chainId, registry, id);
+      const ref = parseEnsip25Key(key)!;
+      links.push({ ...ref, read: await readText(ens, d, name, key) });
+    }
+  } else if (ids.size) {
+    // No pinned ERC-8004 registry on this deployment, so there is no address
+    // to build the ENSIP-25 key from. Say so rather than inventing one.
+    warnings.push("deployment declares no ERC-8004 identity registry; ENSIP-25 agent links not derived");
   }
 
   return { name, resolver: info.resolver, addr, profile, agent, links, warnings };
@@ -228,7 +234,7 @@ export const COIN_TYPE_ETH = 60n;
  * writing a partial record set.
  */
 function setterCall(d: EnsV2Deployment, name: string, node: Hex, key: string, value: string): Hex {
-  if (d.generation === "g2") {
+  if (contractSurface(d) === "g2") {
     const dns = dnsEncode(name);
     return key === "addr"
       ? encodeFunctionData({ abi: permissionedResolverG2Abi, functionName: "setAddress", args: [dns, COIN_TYPE_ETH, getAddress(value)] })
@@ -249,7 +255,7 @@ export function buildRecordsMulticall(
   target: { resolver: Address; name: string; node: Hex },
   changes: RecordsPlan["changes"],
 ): { calldata: Calldata | null; calls: number } {
-  const abi = d.generation === "g2" ? permissionedResolverG2Abi : resolverAbi;
+  const abi = contractSurface(d) === "g2" ? permissionedResolverG2Abi : resolverAbi;
   const calls: Hex[] = [];
   for (const [key, c] of Object.entries(changes)) calls.push(setterCall(d, target.name, target.node, key, c.to));
   const calldata: Calldata | null = calls.length

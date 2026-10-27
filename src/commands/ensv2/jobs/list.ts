@@ -6,7 +6,7 @@ import { TERMINAL_STATES } from "../../../lib/jobs.js";
 
 const inputs = {
   all: { type: InputFieldType.Boolean, flag: "all", message: "Include completed and terminal jobs (default: only jobs that can still run)", required: false, prompt: false, default: false },
-  deployment: { type: InputFieldType.Text, flag: "deployment", message: "ENSv2 deployment: beta (default, the canonical Sepolia beta) or hackathon (ENS Labs' ETHOnline deployment, a newer contract generation)", required: false, prompt: false },
+  deployment: { type: InputFieldType.Text, flag: "deployment", message: "ENSv2 deployment: sepolia (default, ENS Labs' canonical testnet), mainnet (Ethereum L1 — spends real USDC), hackathon (the ETHOnline 2026 deployment), beta (dead, kept only so old jobs resolve)", required: false, prompt: false },
 } satisfies InputSchema;
 
 type ListResult = { dir: string; count: number; deploymentFilter: string | null; jobs: JobSummary[] };

@@ -4,7 +4,7 @@
 
 ENSv2 names and ERC-8004 agent identity, natively inside the [MetaMask Agent Wallet](https://docs.metamask.io/agent-wallet/) CLI (`mm`). An agent wallet can register an ENSv2 name it owns, deploy its own resolver, mint an ERC-8004 agent bound to that name, publish the ENSIP-25/26 records that make it discoverable, and set the name as its primary name — every signature routed through MetaMask policy and MFA, every write verified on chain before the command returns.
 
-**Sepolia only, by design.** ENSv2 is a beta with non-final interfaces; this plugin refuses to run against anything else, and it never falls back to ENSv1 behaviour. Two Sepolia deployments are pinned — the canonical `beta` and ENS Labs' ETHOnline hackathon deployment (`--deployment hackathon`, now the **default**, since `beta` stopped serving ENSv2 as of 2026-09-16 — see [Which deployment](#which-deployment)). Docs, explainer and live evidence: **https://mm-ensv2.estmcmxci.co** (every page is also Markdown: append `.md`, or fetch `/llms.txt`).
+**Mainnet and Sepolia, fail-closed on both.** ENSv2 went live on Ethereum mainnet on 2026-10-27, and this plugin pins it: `--deployment mainnet` (chain 1) works for everything but ERC-8004 agent binding, which has no adapter on L1 yet. The default stays `sepolia` — ENS Labs' canonical testnet table — because spending real USDC should be something you ask for, not something you get by omission. Two older Sepolia tables remain pinned (`hackathon`, and the dead `beta`) so existing jobs still resolve; see [Which deployment](#which-deployment). The plugin never falls back to ENSv1 behaviour, on any chain. Docs, explainer and live evidence: **https://mm-ensv2.estmcmxci.co** (every page is also Markdown: append `.md`, or fetch `/llms.txt`).
 
 ## Sixty seconds
 
@@ -44,7 +44,7 @@ mm ensv2 status
 
 ### Verify
 
-`mm ensv2 status` must show `isV2: true` and five passing checks. `mm ensv2 status --chain 1` must refuse: no mainnet deployment exists, and that refusal is the plugin's first invariant.
+`mm ensv2 status` must show `isV2: true` and eight passing checks against the default `sepolia` table. `mm ensv2 status --deployment mainnet` must also pass, with the same eight — that is ENSv2 on chain 1. `mm ensv2 status --chain 8453` must refuse: the plugin pins no deployment there, and refusing rather than guessing is its first invariant.
 
 ## For agents
 
@@ -63,44 +63,51 @@ Every command accepts `--json`. The host wraps the result as `{ "ok": true, "dat
 
 Or steps 1–6 as one job: `mm ensv2 provision NAME … --json`, then `mm ensv2 jobs show JOBID --json`.
 
-Rules that keep you out of trouble: **never re-send a write because a call failed** (a failed call is not a failed transaction; re-run the same command and it re-derives state from chain, or read `jobs show`); every write has an inspectable plan (`resolver plan`, `provision --dry-run`, `records get`, `primary get`); every command is idempotent for the same inputs; mainnet is refused; the commit secret under `~/.mm-plugin-ensv2/` is private, do not read or move it.
+Rules that keep you out of trouble: **never re-send a write because a call failed** (a failed call is not a failed transaction; re-run the same command and it re-derives state from chain, or read `jobs show`); every write has an inspectable plan (`resolver plan`, `provision --dry-run`, `records get`, `primary get`); every command is idempotent for the same inputs; **mainnet writes spend real USDC** (`--deployment mainnet` is never the default — check `deployment` in any `--json` output before a write); the commit secret under `~/.mm-plugin-ensv2/` is private, do not read or move it.
 
 ## Which deployment
 
-Two ENSv2 deployments are pinned, **both on Sepolia (chain 11155111)**. Pick one with `--deployment`, available on every command; `MM_ENSV2_DEPLOYMENT` is the fallback.
+Four deployments are pinned. Pick one with `--deployment`, available on every command; `MM_ENSV2_DEPLOYMENT` is the fallback. Naming a deployment implies its chain, so `--deployment mainnet` needs no `--chain 1`; naming a chain implies that chain's canonical deployment, so `--chain 1` needs no `--deployment mainnet`. An incoherent pair is refused rather than silently resolved either way.
 
-**As of 2026-09-16, `hackathon` is the default — but `beta` is still ENS Labs' canonical deployment.** `beta`'s Universal Resolver (`0xeEeE…EeEe`) stopped matching our pinned g1 table because ENS Labs redeployed it on 2026-09-15 to a new (third) contract generation — confirmed directly by Kevin at ENS Labs, not a failure. `mm ensv2 status --deployment beta` reports `ENSv2 NOT ACTIVE` only because this plugin hasn't onboarded that new generation yet, not because `beta` is gone. The new deployment is recorded on a working, not-yet-merged ENS docs branch (docs.ens.domains itself still shows the stale table): https://feature-permres-inode-refact.docs-bao.pages.dev/learn/deployments/#sepolia-ensv2-beta. `hackathon` stays the default until `beta`'s new generation is properly re-pinned, which is waiting on that docs branch to merge.
+**ENSv2 is live on Ethereum mainnet as of 2026-10-27.** Namechain was cancelled in February 2026 and ENSv2 shipped on L1 instead. Verified on chain: `isENSv2()` is true on `0xeEeE…EeEe`, the root → `.eth` → root hierarchy is consistent both ways, migrated names answer from the v2 `.eth` registry (`nick.eth` reads `REGISTERED` with its own resolver) and unmigrated ones fall through to `ENSV1Resolver` (`vitalik.eth`, `ens.eth` read `RESERVED`). Registration is priced in **real USDC** — about $8.00 a year for a free label — or real DAI.
 
-| | `beta` | `hackathon` *(default)* |
-|---|---|---|
-| What it is | ENS Labs' canonical Sepolia deployment — redeployed 2026-09-15 to a generation not yet onboarded here, see above | ENS Labs' dedicated deployment for the **ETHOnline 2026** hackathon |
-| Deployment id | `ensv2-sepolia-2026-07-30` | `ensv2-sepolia-hackathon-2026-09` |
-| Contract generation | g1 (stale — live chain is on a newer, unpinned generation) | **g2** |
-| Lifetime | this table is stale as of 2026-09-16; the deployment itself is ongoing | not announced; status pending ENS Labs |
-| Use it when | not yet — this table doesn't match what's live; use `hackathon` until it's re-pinned | always, for now |
+| | `sepolia` *(default)* | `mainnet` | `hackathon` | `beta` |
+|---|---|---|---|---|
+| What it is | ENS Labs' canonical ENSv2 testnet deployment | ENSv2 on Ethereum L1 | the **ETHOnline 2026** deployment | the original beta — **dead** |
+| Chain | 11155111 | **1** | 11155111 | 11155111 |
+| Deployment id | `ensv2-sepolia-2026-10-01` | `ensv2-mainnet-2026-10-18` | `ensv2-sepolia-hackathon-2026-09` | `ensv2-sepolia-2026-07-30` |
+| Generation | **g3** | **g3** | g2 | g1 |
+| Payment token | MockUSDC (open `mint`, use `faucet`) | **real USDC** (and real DAI) | its own MockUSDC | its own MockUSDC |
+| ERC-8004 binding | yes | **no** — no `Adapter8004` on chain 1 | yes | yes |
+| Gate | 8 checks, passing | 8 checks, passing | 7 checks, passing | 5 checks, **failing — correctly** |
+| Use it when | by default, for everything | you want a real name on L1 | you have names or agents there already | never; it is kept only so old jobs resolve |
 
 ```bash
-mm ensv2 status --deployment beta       # confirm before relying on it — currently reports NOT ACTIVE (stale table, not a dead deployment)
-mm ensv2 whois grilledcheese.eth --deployment beta
-export MM_ENSV2_DEPLOYMENT=beta    # …or set it once for the session
+mm ensv2 status                            # the default: canonical Sepolia
+mm ensv2 status --deployment mainnet       # ENSv2 on L1 — confirm before any write
+mm ensv2 whois nick.eth --deployment mainnet
+export MM_ENSV2_DEPLOYMENT=mainnet         # …or set it once for the session
 ```
 
-**They are different contract generations, and the gate never accepts one for the other.** `--deployment beta` run against the hackathon contracts is refused on its first check, and the reverse likewise. What actually moved between them:
+**`beta` is dead, and that is what its refusal means.** Its `universalResolver` is `0xeEeE…EeEe` — the *same address* the canonical `sepolia` table uses, because it is an upgradeable proxy that ENS Labs upgraded in place, twice: to a third generation on 2026-09-15, and again at launch. The g1 table's other addresses are orphaned. `mm ensv2 status --deployment beta` reports `ENSv2 NOT ACTIVE`, which is the gate working: it asks the chain what that address is *currently* serving rather than trusting the table, and refuses to transact against a deployment it no longer describes. The table stays pinned so a job, receipt or verification result written against `ensv2-sepolia-2026-07-30` still resolves.
 
-| Concern | g1 (`beta`) | g2 (`hackathon`) |
-|---|---|---|
-| `IUniversalResolverV2` id | `0xf99a5e06` | `0x1a6cc9f0` |
-| `isENSv2()` | reverts | returns `true` |
-| Registry navigation (`findCanonicalRegistry`, `findParentRegistry`) | on the Universal Resolver | on a separate `UniversalHelper`; the UR reverts |
-| Resolver record setters | `setAddr` / `setText(bytes32 node, …)` | `setAddress` / `setText(bytes dnsName, …)` — no `setAddr` at all |
-| Resolver initializer | `initialize(address,uint256,bytes[])` | `initialize(Grant[],bytes[])` |
-| Resolver CREATE2 salt scheme | identical | identical |
-| Forward + reverse resolution | `findResolver` / `resolve` / `reverse` on the UR | identical |
-| ERC-8004 adapter + IdentityRegistry | same contracts | same contracts |
+**Three generations, three gates, and no gate accepts another's contracts.** What actually moved:
 
-**Names and agents are per deployment.** A registration, a resolver, a primary name and an ERC-8004 binding all belong to the deployment they were made on. `mm ensv2 whois agent.eth` and `mm ensv2 whois agent.eth --deployment beta` are two different questions with two different answers; a name that is taken on one may well be free on the other; and a provisioning job created under one deployment refuses to resume under the other (`E_UNSUPPORTED_DEPLOYMENT`). Each deployment has its own payment token, so `mm ensv2 faucet --deployment beta` mints a *different* test USDC from the hackathon's.
+| Concern | g1 (`beta`) | g2 (`hackathon`) | g3 (`sepolia`, `mainnet`) |
+|---|---|---|---|
+| Version probe | `supportsInterface(0xf99a5e06)` | `supportsInterface(0x1a6cc9f0)` | **`isENSv2()` is true; both ids are `false`** |
+| `isENSv2()` | reverts | returns `true` | returns `true` |
+| Registry navigation (`findCanonicalRegistry`, `findParentRegistry`) | on the Universal Resolver | on a separate `UniversalHelper`; the UR reverts | same as g2 |
+| Resolver record setters | `setAddr` / `setText(bytes32 node, …)` | `setAddress` / `setText(bytes dnsName, …)` — no `setAddr` at all | same as g2 |
+| Resolver initializer | `initialize(address,uint256,bytes[])` | `initialize(Grant[],bytes[])` | same as g2 |
+| Resolver CREATE2 salt scheme | identical | identical | identical |
+| Forward + reverse resolution | `findResolver` / `resolve` / `reverse` on the UR | identical | identical |
 
-`--chain` is unchanged: 11155111 or a refusal. Mainnet stays disabled until a canonical production deployment exists.
+**g3 is g2's contracts.** The launch deployments and the ETHOnline one were built from the same sources, and the deployed bytecode was compared selector by selector on 2026-10-27 to prove it: `ETHRegistrar` is the same 8037 bytes with the same entry points on all three, `PermissionedResolverImpl` exposes exactly the same setters and initializer, `VerifiableFactory` and `ETHRegistry` match to the byte. So one set of encoders serves both generations, and g3 exists as a separate generation for exactly one reason — its Universal Resolver no longer advertises the g2 ERC-165 interface id, while still answering `isENSv2()`. That is the gate's business, not the encoders'. Upstream `ensdomains/ens-cli` made the same switch to `isENSv2()`.
+
+**Names and agents are per deployment.** A registration, a resolver, a primary name and an ERC-8004 binding all belong to the deployment they were made on. `mm ensv2 whois agent.eth` and `mm ensv2 whois agent.eth --deployment mainnet` are two different questions with two different answers; a name taken on one may well be free on the other; and a provisioning job created under one deployment refuses to resume under another (`E_UNSUPPORTED_DEPLOYMENT`). Each Sepolia deployment has its own test USDC, so `mm ensv2 faucet --deployment hackathon` mints a *different* token from the canonical table's.
+
+**What mainnet cannot do.** `Adapter8004` (`0x7621630c…`) has no code on chain 1, so nothing can be minted or bound there: `agent register`, `agent info` and `agent set-uri` refuse with `ENSV2_NO_AGENT_IDENTITY`, `records set --link-agent` has no binding to link, and `provision` refuses an intent that asks for `identity: erc8004` (run it with `--no-identity`). The manifest declares those three commands Sepolia-only, so the host refuses them on chain 1 before the plugin runs. `faucet` is Sepolia-only for the same kind of reason: real USDC has no open `mint`. The canonical ERC-8004 IdentityRegistry *is* live on mainnet, so ENSIP-25 keys still derive and read there — it is only the binding adapter that is missing. When it ships, pinning it is a one-line table edit.
 
 ## Commands
 
@@ -132,12 +139,17 @@ mm ensv2 jobs abandon <jobId>       set a finished or failed job aside (renamed,
 Every command above also accepts:
 
 ```
---deployment <beta|hackathon>   which pinned Sepolia deployment to talk to (default hackathon; env MM_ENSV2_DEPLOYMENT)
---chain <id>                    EVM chain id (default 11155111; anything else is refused)
+--deployment <sepolia|mainnet|hackathon|beta>
+                                which pinned deployment to talk to (default sepolia; env MM_ENSV2_DEPLOYMENT).
+                                Implies its own chain, so --deployment mainnet needs no --chain 1.
+--chain <id>                    EVM chain id: 1 or 11155111 (default 11155111). Implies that chain's
+                                canonical deployment. Any other chain is refused.
 --json                          machine-readable output
 ```
 
-On `jobs show` and `jobs abandon` the flag is validated but has no effect — those are addressed by job id, and the job's own deployment is what they report. `jobs list` lists both deployments unless you name one.
+On `jobs show` and `jobs abandon` the flag is validated but has no effect — those are addressed by job id, and the job's own deployment is what they report. `jobs list` lists every deployment's jobs unless you name one.
+
+`agent register`, `agent info`, `agent set-uri` and `faucet` are Sepolia-only and declare it in the manifest; the other 18 commands accept chain 1.
 
 Full reference with every flag, generated from the plugin's manifest: https://mm-ensv2.estmcmxci.co/reference/commands.
 
@@ -162,9 +174,20 @@ All commands run the same fail-closed gate first. `whois` and `resolver` locate 
 
 `status` fails closed. If the Universal Resolver is not serving ENSv2, or the chain's registry hierarchy disagrees with the configured deployment, the command exits non-zero instead of quietly behaving like ENSv1. Every write command added to this plugin runs the same check first.
 
-The gate is **generation-aware**: which reads it performs is decided by the selected deployment's generation, and a table of one generation can never be accepted against the other's contracts.
+The gate is **generation-aware**: which reads it performs is decided by the selected deployment's generation, and a table of one generation can never be accepted against another's contracts.
 
-On `beta` (g1) it performs five reads and reports each one:
+On `sepolia` and `mainnet` (g3) it performs eight reads and reports each one:
+
+1. `UniversalResolver.isENSv2()` returns `true` — the launch UR advertises no `IUniversalResolverV2` id, so the version question goes to the function directly
+2. `UniversalResolver.supportsInterface(0xf99a5e06)` is **false** — no cross-accepting a g1 deployment
+3. `UniversalResolver.supportsInterface(0x1a6cc9f0)` is **false** — nor a g2 one
+4. `UniversalHelper.findCanonicalRegistry("eth")` equals the configured `.eth` registry — the UR reverts on this call
+5. `RootRegistry.getSubregistry("eth")` points at that registry (forward)
+6. that registry's `getParent()` points back at the root with label `eth` (backward)
+7. `VerifiableFactory.proxyLogic()` matches the configured proxy logic, so CREATE2 resolver prediction is sound
+8. `UniversalResolver.findResolver("eth")` is callable — resolution stayed on the UR, and every read goes through it
+
+On `beta` (g1) it performs five reads:
 
 1. `UniversalResolver.supportsInterface(IUniversalResolverV2 = 0xf99a5e06)` is true
 2. `UniversalResolver.findCanonicalRegistry("eth")` equals the configured `.eth` registry
@@ -172,7 +195,7 @@ On `beta` (g1) it performs five reads and reports each one:
 4. that registry's `getParent()` points back at the root with label `eth` (backward)
 5. `VerifiableFactory.proxyLogic()` matches the configured proxy logic, so CREATE2 resolver prediction is sound
 
-On `hackathon` (g2) it performs seven, because two things moved:
+On `hackathon` (g2) it performs seven, because two things had moved by then:
 
 1. `UniversalResolver.supportsInterface(IUniversalResolverV2 = 0x1a6cc9f0)` is true — a different id on this generation
 2. `UniversalResolver.supportsInterface(0xf99a5e06)` is **false** — the explicit refusal to cross-accept a g1 deployment
@@ -182,11 +205,11 @@ On `hackathon` (g2) it performs seven, because two things moved:
 6. `VerifiableFactory.proxyLogic()` matches the configured proxy logic
 7. `UniversalResolver.findResolver("eth")` is callable — resolution itself stayed on the UR, and every read goes through it
 
-Check 1 of each list is what makes the two un-crossable: on chain the beta UR answers `false` to the g2 id and reverts on `isENSv2()`, and the hackathon UR answers `false` to the g1 id.
+The opening checks are what make the three un-crossable, and they are measured rather than assumed. On chain: the g1 UR answers `false` to the g2 id and reverts on `isENSv2()`; the g2 UR answers `false` to the g1 id; both g3 URs answer `false` to *both* ids while answering `isENSv2()` true, and still report ERC-165 itself (`0x01ffc9a7` → true), so those are real answers and not a missing function. This matters most for the live case where `beta` and `sepolia` name the same, upgraded, address.
 
 ### Why `resolver deploy` exists
 
-ENSv2 replaces the single shared Public Resolver with **one `PermissionedResolver` proxy per account**. A freshly registered name has no resolver, resolves to nothing, and can hold no records until one is deployed and assigned. `deploy` provisions it through the `VerifiableFactory`: it predicts the CREATE2 address (salt derived from the wallet address, `proxyLogic` read from chain), no-ops if code already exists there, builds the `deployProxy(...)` calldata with the initializer that deployment's implementation actually exposes — the three-argument `initialize(admin, ALL_ROLES, [])` on `beta`, and `initialize([{admin, roles}], [])` on `hackathon`, where `roles` is composed from `PermissionedResolverLib`'s named constants rather than a blanket literal — hands `{to, data, value: 0}` to the wallet executor, waits for the receipt, then re-reads the chain and requires the factory to attest the proxy. The plugin never sees a key.
+ENSv2 replaces the single shared Public Resolver with **one `PermissionedResolver` proxy per account**. A freshly registered name has no resolver, resolves to nothing, and can hold no records until one is deployed and assigned. `deploy` provisions it through the `VerifiableFactory`: it predicts the CREATE2 address (salt derived from the wallet address, `proxyLogic` read from chain), no-ops if code already exists there, builds the `deployProxy(...)` calldata with the initializer that deployment's implementation actually exposes — the three-argument `initialize(admin, ALL_ROLES, [])` on `beta` (g1), and `initialize([{admin, roles}], [])` on `sepolia`, `mainnet` and `hackathon`, where `roles` is composed from `PermissionedResolverLib`'s named constants rather than a blanket literal — hands `{to, data, value: 0}` to the wallet executor, waits for the receipt, then re-reads the chain and requires the factory to attest the proxy. The plugin never sees a key.
 
 Run `plan` first to see the address and the exact calldata. Deploying costs only gas.
 
@@ -284,16 +307,18 @@ Then `npm pack` and install the tarball as above. The docs site lives in `site/`
 
 `src/lib/deployments.ts`, one table per deployment, each with per-field provenance comments.
 
-For `beta`: the official ENS deployment table, the checked-in Sepolia deployment artifacts in `ensdomains/contracts-v2`, and `ensdomains/ens-cli`, all cross-checked and verified live.
+For `sepolia` and `mainnet`: the *Sepolia (ENSv2)* and *Mainnet (ENSv2)* tables on [docs.ens.domains/learn/deployments](https://docs.ens.domains/learn/deployments), row for row, with a second independent table agreeing on every pinned address (`ensdomains/ensjs`, `packages/ensjs/src/clients/chain.ts`) and every derivable value re-derived live on 2026-10-27. Where sources disagree with each other, the table follows the two that agree and says so: `ens-cli` records a different mainnet `subregistryImplementation`, a field this plugin reads nowhere.
 
-For `hackathon`: the [ENS deployments page](https://feature-permres-inode-refact.docs-bao.pages.dev/learn/deployments#sepolia-ensv2-beta) section *Sepolia (ENSv2 Beta) – ETHOnline 2026 Hackathon Deployment*, row for row, with every derived value re-checked on chain. The matching contract source is the ENS contracts repo's `contracts/src/` — the newer generation — not its `deployments/sepolia` artifacts, which describe `beta`.
+For `beta`: the then-official ENS deployment table, the checked-in Sepolia artifacts in `ensdomains/contracts-v2`, and `ensdomains/ens-cli` @ 256cc45, all cross-checked and verified live in September 2026. All three have since moved on; the table is kept as the historical record a 0.7.x job was written against.
 
-Neither table is trusted blindly: `status` re-derives the registry from chain and refuses if the table disagrees; the resolver factory's clone target, the adapter implementation (EIP-1967 slot) and the reverse registrar (root → reverse TLD resolver → v1 registry) are each re-derived on use. Full generated table, both deployments: https://mm-ensv2.estmcmxci.co/reference/deployment.
+For `hackathon`: the ETHOnline deployments page, row for row, derived live on 2026-09-04 and re-verified 2026-10-27.
+
+No table is trusted blindly: `status` re-derives the registry from the deployment's own navigation surface and refuses if the table disagrees; the resolver factory's clone target, the adapter implementation (EIP-1967 slot) and the reverse registrar (root → reverse TLD resolver → v1 registry → `owner(addr.reverse)`) are each re-derived on use. Full generated table, all four deployments: https://mm-ensv2.estmcmxci.co/reference/deployment.
 
 ## Design notes
 
 - Detection is ported from `ensdomains/ens-cli` (`src/lib/context.ts`) with its fail-open default inverted.
-- The probe is `supportsInterface(0xf99a5e06)`, not `isENSv2()` — the latter is declared in some copies of the contracts source but does not exist on the deployed Universal Resolver.
+- The probe depends on the generation. On g1 it is `supportsInterface(0xf99a5e06)`, because `isENSv2()` reverts on that Universal Resolver; on g2, `supportsInterface(0x1a6cc9f0)`; on g3 it is `isENSv2()` itself, because the launch UR advertises neither older id. Each gate also asserts the *other* generations' ids absent, so no two can be confused.
 - The host-provided `ctx.publicClient(chainId)` carries no `chain` object; every read passes an explicit address.
 - Signing never happens in the plugin. Write commands build calldata and hand it to `ctx.walletExecutor()`.
 - The job engine (`src/lib/provision.ts`) imports nothing from the host: it reads through `ProvisionChain` and sends through `Submit`, so the interruption matrix runs against an in-memory chain that applies the engine's real calldata (`test/mock-chain.mjs`), and `scripts/check.mjs provision-plan` runs the planner against public Sepolia.

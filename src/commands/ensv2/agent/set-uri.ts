@@ -8,15 +8,15 @@ import {
   schemaToFlags,
 } from "@metamask/agent-wallet/plugin";
 import { agentInfo, findAgentIdsForName, setUriPlan } from "../../../lib/agent.js";
-import { parseChainId, parseDeploymentKey, requireEnsV2, toCommandError } from "../../../lib/gate.js";
+import { resolveTarget, requireAgentIdentity, requireEnsV2, toCommandError } from "../../../lib/gate.js";
 import { selectedEvmAddress } from "../../../lib/wallet.js";
 
 const inputs = {
   name: { type: InputFieldType.Text, flag: "name", message: "Registered ENSv2 name this wallet owns (e.g. myagent.eth)", required: true, index: 0 },
   uri: { type: InputFieldType.Text, flag: "uri", message: "new agentURI — http(s):// or ipfs:// URI of the agent's ERC-8004 registration JSON", required: true, prompt: true },
   agentId: { type: InputFieldType.Text, flag: "agent-id", message: "ERC-8004 agent id (default: the agent bound to the name, found by event scan)", required: false, prompt: false },
-  chain: { type: InputFieldType.Text, flag: "chain", message: "EVM chain id (default 11155111, Sepolia)", required: false, prompt: false },
-  deployment: { type: InputFieldType.Text, flag: "deployment", message: "ENSv2 deployment: beta (default, the canonical Sepolia beta) or hackathon (ENS Labs' ETHOnline deployment, a newer contract generation)", required: false, prompt: false },
+  chain: { type: InputFieldType.Text, flag: "chain", message: "EVM chain id (default 11155111, Sepolia; 1 for Ethereum mainnet — or just name the deployment, which implies its chain)", required: false, prompt: false },
+  deployment: { type: InputFieldType.Text, flag: "deployment", message: "ENSv2 deployment: sepolia (default, ENS Labs' canonical testnet), mainnet (Ethereum L1 — spends real USDC), hackathon (the ETHOnline 2026 deployment), beta (dead, kept only so old jobs resolve)", required: false, prompt: false },
 } satisfies InputSchema;
 
 type SetUriResult = {
@@ -56,11 +56,12 @@ export default class EnsV2AgentSetUri extends PluginCommand<SetUriResult> {
 
   async execute(io: CommandIO): Promise<SetUriResult> {
     const v = await io.resolveInputs(inputs);
-    const chainId = parseChainId(v.chain);
-    const deploymentKey = parseDeploymentKey(v.deployment);
+    const { chainId, deploymentKey } = resolveTarget(v.chain, v.deployment);
     const client = this.ctx.publicClient(chainId);
     try {
-      const { deployment: d } = await requireEnsV2(client, chainId, deploymentKey);
+      const { deployment: table } = await requireEnsV2(client, chainId, deploymentKey);
+      // ERC-8004 agent work needs an Adapter8004; mainnet has none.
+      const d = requireAgentIdentity(table);
       const owner = selectedEvmAddress(this.ctx.walletStateManager.read());
       if (!owner) throw new CommandError("ENSV2_NO_WALLET", "No EVM wallet is selected.", "Run `mm wallet` to create or select one, then retry.");
 

@@ -6,14 +6,14 @@ import {
   schemaToArgs,
   schemaToFlags,
 } from "@metamask/agent-wallet/plugin";
-import { parseChainId, parseDeploymentKey, requireEnsV2, toCommandError } from "../../../lib/gate.js";
+import { resolveTarget, requireEnsV2, toCommandError } from "../../../lib/gate.js";
 import { readRecordSet, type RecordSet } from "../../../lib/records.js";
 
 const inputs = {
   name: { type: InputFieldType.Text, flag: "name", message: "ENSv2 name (e.g. myagent.eth)", required: true, index: 0 },
   agentIds: { type: InputFieldType.Text, flag: "agent-ids", message: "comma-separated ERC-8004 agent ids to check ENSIP-25 links for", required: false, prompt: false },
-  chain: { type: InputFieldType.Text, flag: "chain", message: "EVM chain id (default 11155111, Sepolia)", required: false, prompt: false },
-  deployment: { type: InputFieldType.Text, flag: "deployment", message: "ENSv2 deployment: beta (default, the canonical Sepolia beta) or hackathon (ENS Labs' ETHOnline deployment, a newer contract generation)", required: false, prompt: false },
+  chain: { type: InputFieldType.Text, flag: "chain", message: "EVM chain id (default 11155111, Sepolia; 1 for Ethereum mainnet — or just name the deployment, which implies its chain)", required: false, prompt: false },
+  deployment: { type: InputFieldType.Text, flag: "deployment", message: "ENSv2 deployment: sepolia (default, ENS Labs' canonical testnet), mainnet (Ethereum L1 — spends real USDC), hackathon (the ETHOnline 2026 deployment), beta (dead, kept only so old jobs resolve)", required: false, prompt: false },
 } satisfies InputSchema;
 
 /**
@@ -38,8 +38,7 @@ export default class EnsV2RecordsGet extends PluginCommand<RecordSet> {
 
   async execute(io: CommandIO): Promise<RecordSet> {
     const { name, agentIds, chain, deployment: deploymentFlag } = await io.resolveInputs(inputs);
-    const chainId = parseChainId(chain);
-    const deploymentKey = parseDeploymentKey(deploymentFlag);
+    const { chainId, deploymentKey } = resolveTarget(chain, deploymentFlag);
     const client = this.ctx.publicClient(chainId);
     try {
       const { deployment } = await requireEnsV2(client, chainId, deploymentKey);

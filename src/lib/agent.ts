@@ -1,6 +1,12 @@
 /**
  * ERC-8004 agent identity via Adapter8004 (v0.5). Pure; no SDK import.
  *
+ * Every function here takes an `EnsV2DeploymentWithIdentity` — a deployment
+ * that actually has an Adapter8004. Mainnet does not (the adapter is not
+ * deployed on chain 1), and rather than carry a zero address through a mint,
+ * the type makes that unrepresentable: callers narrow with `hasAgentIdentity`
+ * and refuse by name first.
+ *
  * The adapter mints an agent on the canonical ERC-8004 IdentityRegistry and
  * binds it to a token the caller controls. For an ENSv2 name that token is
  * the name's entry in the registry that holds it, identified by its CURRENT
@@ -23,7 +29,7 @@
  */
 import { decodeEventLog, encodeFunctionData, isAddressEqual, parseAbiItem, type Address, type Hex, type PublicClient, type TransactionReceipt } from "viem";
 import { TOKEN_STANDARD, adapter8004Abi, identityRegistryAbi } from "./abis.js";
-import type { EnsV2Deployment } from "./deployments.js";
+import type { EnsV2DeploymentWithIdentity } from "./deployments.js";
 import { ensip25Key } from "./erc7930.js";
 import { ReadError, ensClient, whois, type WhoisInfo } from "./reads.js";
 import type { Calldata } from "./registrar.js";
@@ -46,7 +52,7 @@ export type BindPlan = {
 };
 
 /** Preconditions + calldata for adapter.register(). Throws ReadError when the name is not bindable by this owner. */
-export async function bindPlan(client: PublicClient, d: EnsV2Deployment, name: string, owner: Address, agentURI: string): Promise<BindPlan> {
+export async function bindPlan(client: PublicClient, d: EnsV2DeploymentWithIdentity, name: string, owner: Address, agentURI: string): Promise<BindPlan> {
   if (!agentURI || !/^(https?:\/\/|ipfs:\/\/)\S+$/i.test(agentURI)) {
     throw new ReadError("ENSV2_INVALID_AGENT_URI", `'${agentURI}' is not an http(s):// or ipfs:// URI.`, "ERC-8004 verifiers dereference agentURI expecting a registration JSON.");
   }
@@ -116,7 +122,7 @@ export type AgentInfo = {
 };
 
 /** Everything the chain says about one agent id relative to a name. */
-export async function agentInfo(client: PublicClient, d: EnsV2Deployment, name: string, agentId: bigint): Promise<AgentInfo> {
+export async function agentInfo(client: PublicClient, d: EnsV2DeploymentWithIdentity, name: string, agentId: bigint): Promise<AgentInfo> {
   const w = await whois(client, d, name);
   const [binding, isCtrl, holder, uri] = await Promise.all([
     client.readContract({ address: d.adapter8004, abi: adapter8004Abi, functionName: "bindingOf", args: [agentId] }),
@@ -166,7 +172,7 @@ export async function agentInfo(client: PublicClient, d: EnsV2Deployment, name: 
  */
 export async function findAgentIdsForName(
   client: PublicClient,
-  d: EnsV2Deployment,
+  d: EnsV2DeploymentWithIdentity,
   name: string,
   opts: { maxChunks?: number; chunk?: bigint; all?: boolean } = {},
 ): Promise<{ agentIds: bigint[]; registeredBy: Record<string, Address>; scannedFrom: bigint; scannedTo: bigint; currentTokenId: bigint }> {
@@ -216,7 +222,7 @@ export type SetUriPlan = {
  * role change) can never be repaired this way. No-op when the URI already
  * matches. The URI should dereference to an ERC-8004 `registration-v1` JSON.
  */
-export async function setUriPlan(client: PublicClient, d: EnsV2Deployment, name: string, owner: Address, agentId: bigint, uri: string): Promise<SetUriPlan> {
+export async function setUriPlan(client: PublicClient, d: EnsV2DeploymentWithIdentity, name: string, owner: Address, agentId: bigint, uri: string): Promise<SetUriPlan> {
   if (!uri || !/^(https?:\/\/|ipfs:\/\/)\S+$/i.test(uri)) {
     throw new ReadError("ENSV2_INVALID_AGENT_URI", `'${uri}' is not an http(s):// or ipfs:// URI.`, "ERC-8004 verifiers dereference agentURI expecting a registration JSON.");
   }

@@ -1,6 +1,11 @@
 /**
  * Minimal ABIs, human-readable form.
  *
+ * The g2 ABIs below serve g3 as well. The launch deployments' contracts are
+ * selector-identical to the ETHOnline ones — compared against the deployed
+ * bytecode on 2026-10-27 — so `contractSurface()` maps both onto these, and
+ * only the gate distinguishes them. See deployments.ts.
+ *
  * g1 (the `beta` deployment) signatures are taken from the deployed Sepolia
  * artifacts (contracts-v2-post-audit-2/contracts/deployments/sepolia), NOT
  * from that repo's `contracts/src/`.
@@ -92,7 +97,7 @@ export const ethRegistrarAbi = parseAbi([
 /** StandardRentPriceOracle. */
 export const rentPriceOracleAbi = parseAbi(["function isPaymentToken(address paymentToken) external view returns (bool)"]);
 
-/** Minimal ERC-20, plus MockUSDC's open mint (Sepolia beta only). */
+/** Minimal ERC-20, plus MockUSDC's open mint (the Sepolia test tokens only). */
 export const erc20Abi = parseAbi([
   "function balanceOf(address account) external view returns (uint256)",
   "function decimals() external view returns (uint8)",

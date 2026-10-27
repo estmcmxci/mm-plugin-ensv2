@@ -6,7 +6,7 @@ import {
   schemaToArgs,
   schemaToFlags,
 } from "@metamask/agent-wallet/plugin";
-import { parseChainId, parseDeploymentKey, requireEnsV2, toCommandError } from "../../lib/gate.js";
+import { resolveTarget, requireEnsV2, toCommandError } from "../../lib/gate.js";
 import { quoteRegistration, yearsToSeconds, type Quote } from "../../lib/registrar.js";
 
 const inputs = {
@@ -27,14 +27,14 @@ const inputs = {
   chain: {
     type: InputFieldType.Text,
     flag: "chain",
-    message: "EVM chain id (default 11155111, Sepolia)",
+    message: "EVM chain id (default 11155111, Sepolia; 1 for Ethereum mainnet — or just name the deployment, which implies its chain)",
     required: false,
     prompt: false,
   },
   deployment: {
     type: InputFieldType.Text,
     flag: "deployment",
-    message: "ENSv2 deployment: beta (default, the canonical Sepolia beta) or hackathon (ENS Labs' ETHOnline deployment, a newer contract generation)",
+    message: "ENSv2 deployment: sepolia (default, ENS Labs' canonical testnet), mainnet (Ethereum L1 — spends real USDC), hackathon (the ETHOnline 2026 deployment), beta (dead, kept only so old jobs resolve)",
     required: false,
     prompt: false,
   },
@@ -64,8 +64,7 @@ export default class EnsV2Price extends PluginCommand<Quote> {
 
   async execute(io: CommandIO): Promise<Quote> {
     const { name, years, chain, deployment: deploymentFlag } = await io.resolveInputs(inputs);
-    const chainId = parseChainId(chain);
-    const deploymentKey = parseDeploymentKey(deploymentFlag);
+    const { chainId, deploymentKey } = resolveTarget(chain, deploymentFlag);
     const client = this.ctx.publicClient(chainId);
     try {
       const { deployment } = await requireEnsV2(client, chainId, deploymentKey);

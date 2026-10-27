@@ -9,7 +9,7 @@ import {
 } from "@metamask/agent-wallet/plugin";
 import { type Hex } from "viem";
 import { agentIdFromReceipt, agentInfo, bindPlan } from "../../../lib/agent.js";
-import { parseChainId, parseDeploymentKey, requireEnsV2, toCommandError } from "../../../lib/gate.js";
+import { resolveTarget, requireAgentIdentity, requireEnsV2, toCommandError } from "../../../lib/gate.js";
 import { selectedEvmAddress } from "../../../lib/wallet.js";
 
 const inputs = {
@@ -30,14 +30,14 @@ const inputs = {
   chain: {
     type: InputFieldType.Text,
     flag: "chain",
-    message: "EVM chain id (default 11155111, Sepolia)",
+    message: "EVM chain id (default 11155111, Sepolia; 1 for Ethereum mainnet — or just name the deployment, which implies its chain)",
     required: false,
     prompt: false,
   },
   deployment: {
     type: InputFieldType.Text,
     flag: "deployment",
-    message: "ENSv2 deployment: beta (default, the canonical Sepolia beta) or hackathon (ENS Labs' ETHOnline deployment, a newer contract generation)",
+    message: "ENSv2 deployment: sepolia (default, ENS Labs' canonical testnet), mainnet (Ethereum L1 — spends real USDC), hackathon (the ETHOnline 2026 deployment), beta (dead, kept only so old jobs resolve)",
     required: false,
     prompt: false,
   },
@@ -88,12 +88,13 @@ export default class EnsV2AgentRegister extends PluginCommand<AgentRegisterResul
 
   async execute(io: CommandIO): Promise<AgentRegisterResult> {
     const { name, uri, chain, deployment: deploymentFlag } = await io.resolveInputs(inputs);
-    const chainId = parseChainId(chain);
-    const deploymentKey = parseDeploymentKey(deploymentFlag);
+    const { chainId, deploymentKey } = resolveTarget(chain, deploymentFlag);
     const client = this.ctx.publicClient(chainId);
 
     try {
-      const { deployment: d } = await requireEnsV2(client, chainId, deploymentKey);
+      const { deployment: table } = await requireEnsV2(client, chainId, deploymentKey);
+      // ERC-8004 agent work needs an Adapter8004; mainnet has none.
+      const d = requireAgentIdentity(table);
       const owner = selectedEvmAddress(this.ctx.walletStateManager.read());
       if (!owner) throw new CommandError("ENSV2_NO_WALLET", "No EVM wallet is selected.", "Run `mm wallet` to create or select one, then retry.");
 

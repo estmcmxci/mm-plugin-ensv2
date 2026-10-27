@@ -54,7 +54,7 @@ Every hop is now checkable by a stranger: name → agent (ENSIP-25 record), agen
 
 ## What the run proved
 
-- Detection refuses mainnet and confirms Sepolia ENSv2 on every command.
+- Detection confirms the selected deployment is really serving its generation of ENSv2, on every command, and refuses any chain with no pinned table.
 - A resolver's address is predicted correctly before deployment and attested after.
 - Registration lands with the resolver bound, and a real interruption resumed without a duplicate payment.
 - An agent is minted and bound in one transaction, and the name's ENSIP-25 link makes it findable.
