@@ -27,7 +27,7 @@ mm config set experimentalPlugins true
 
 ### From npm — currently blocked by a host bug, use the tarball route below
 
-The package is published, but Agent Wallet 6.2.0 has a bug in its post-install consent hook: a plugin installed **from the registry** is reported as `installed`, then immediately removed with `PLUGIN_MANIFEST_FILE_MISSING`, even though `oclif.manifest.json` is shipped and npm puts it on disk. Installs from a tarball take a different branch of that hook and work. Reported upstream. Until it is fixed, fetch the very same artifact from npm as a tarball and install that:
+The package is published, but Agent Wallet has a bug in its post-install consent hook: a plugin installed **from the registry by name** is reported as `installed`, then immediately removed, even though `oclif.manifest.json` is shipped and npm puts it on disk. Confirmed on **both 6.2.0 and 7.3.0** against 0.9.0 — two majors apart, so this is not waiting on a point release, and on 7.3.0 it now fails silently with no error text at all. Installs from a tarball take a different branch of that hook and work. Until it is fixed, fetch the very same artifact from npm as a tarball and install that:
 
 ```bash
 npm pack @estmcmxci/mm-plugin-ensv2            # downloads estmcmxci-mm-plugin-ensv2-<version>.tgz from the registry
