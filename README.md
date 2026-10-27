@@ -19,7 +19,7 @@ mm ensv2 primary set myagent.eth       # the wallet now resolves back to its nam
 
 ## Install
 
-Requires MetaMask Agent Wallet **6.2.0+** (`mm --version`), Node 20+, and a wallet with a little Sepolia ETH (a full provisioning run is about 1.2M gas).
+Requires MetaMask Agent Wallet **6.2.x or 7.x** (`mm --version`) — verified on 6.2.0 and 7.3.0, from one install — Node 20+, and a wallet with a little Sepolia ETH (a full provisioning run is about 1.2M gas).
 
 ```bash
 mm config set experimentalPlugins true

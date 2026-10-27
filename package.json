@@ -79,7 +79,7 @@
   },
   "mm": {
     "schemaVersion": 1,
-    "minCliVersion": "^6.2.0",
+    "minCliVersion": "^6.2.0 || ^7.0.0",
     "capabilities": [],
     "commands": [
       {
@@ -389,7 +389,7 @@
     ]
   },
   "peerDependencies": {
-    "@metamask/agent-wallet": "^6.2.0"
+    "@metamask/agent-wallet": "^6.2.0 || ^7.0.0"
   },
   "dependencies": {
     "viem": "^2.35.0"
