@@ -11,9 +11,9 @@
 import { getAddress, isAddressEqual, zeroAddress, type Address, type Hex, type PublicClient } from "viem";
 import { identityRegistryAbi } from "./abis.js";
 import { agentInfo, findAgentIdsForName, type AgentInfo } from "./agent.js";
-import type { EnsV2Deployment } from "./deployments.js";
+import { hasAgentIdentity, type EnsV2Deployment, type EnsV2DeploymentWithIdentity } from "./deployments.js";
 import { detectEnsV2, type EnsV2Detection } from "./ensv2.js";
-import { ensClient, resolverInfo, whois, type ResolverInfo, type WhoisInfo } from "./reads.js";
+import { ReadError, ensClient, resolverInfo, whois, type ResolverInfo, type WhoisInfo } from "./reads.js";
 import { readAddr, readText, type RecordRead } from "./records.js";
 import {
   chainTime,
@@ -70,6 +70,20 @@ export interface ProvisionChain {
 }
 
 export function viemProvisionChain(client: PublicClient, d: EnsV2Deployment): ProvisionChain {
+  /**
+   * The adapter-backed half of this surface, or a refusal. Mainnet pins no
+   * Adapter8004, so a deployment without one cannot mint, bind or inspect an
+   * agent; `planProvision` refuses such an intent up front, and this is the
+   * belt-and-braces for anything that got past it.
+   */
+  const withIdentity = (): EnsV2DeploymentWithIdentity => {
+    if (hasAgentIdentity(d)) return d;
+    throw new ReadError(
+      "ENSV2_NO_AGENT_IDENTITY",
+      `Deployment '${d.key}' (chain ${d.chainId}) has no Adapter8004.`,
+      "ERC-8004 agent identity cannot be minted, bound or inspected on this deployment.",
+    );
+  };
   return {
     detect: () => detectEnsV2(client, d),
     chainTime: () => chainTime(client),
@@ -91,17 +105,17 @@ export function viemProvisionChain(client: PublicClient, d: EnsV2Deployment): Pr
       return out;
     },
     adapterImplementation: async () => {
-      const raw = await client.getStorageAt({ address: d.adapter8004, slot: EIP1967_IMPLEMENTATION_SLOT });
+      const raw = await client.getStorageAt({ address: withIdentity().adapter8004, slot: EIP1967_IMPLEMENTATION_SLOT });
       if (!raw || raw === "0x" || BigInt(raw) === 0n) return zeroAddress;
       return getAddress(`0x${raw.slice(-40)}`);
     },
-    agentInfo: (name, id) => agentInfo(client, d, name, id),
+    agentInfo: (name, id) => agentInfo(client, withIdentity(), name, id),
     findAgentIds: async (name) => {
-      const s = await findAgentIdsForName(client, d, name, { all: true });
+      const s = await findAgentIdsForName(client, withIdentity(), name, { all: true });
       return { agentIds: s.agentIds, registeredBy: s.registeredBy, scannedFrom: s.scannedFrom, scannedTo: s.scannedTo };
     },
     bindingMetadata: async (agentId) => {
-      const raw = await client.readContract({ address: d.identityRegistry, abi: identityRegistryAbi, functionName: "getMetadata", args: [agentId, "agent-binding"] });
+      const raw = await client.readContract({ address: withIdentity().identityRegistry, abi: identityRegistryAbi, functionName: "getMetadata", args: [agentId, "agent-binding"] });
       if (!raw || raw === "0x") return null;
       const hex = raw.slice(2);
       if (hex.length !== 40 && hex.length !== 64) return null;

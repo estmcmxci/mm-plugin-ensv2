@@ -1,20 +1,20 @@
 ---
 title: "What this is"
-description: "ENSv2 names and ERC-8004 agent identity, natively inside the MetaMask Agent Wallet CLI. Sepolia beta. Fail-closed, key-less, verified live."
+description: "ENSv2 names and ERC-8004 agent identity, natively inside the MetaMask Agent Wallet CLI. Mainnet and Sepolia. Fail-closed, key-less, verified live."
 ---
 
 # ENS for agents, natively in `mm`
 
 `@estmcmxci/mm-plugin-ensv2` is a plugin for the MetaMask Agent Wallet CLI. It gives `mm` a native `ensv2` topic: an agent wallet can **register an ENSv2 name it owns, deploy its own resolver, mint an ERC-8004 agent bound to that name, publish the ENSIP-25/26 records that make it discoverable, and set the name as its primary name** — with every signature routed through MetaMask policy and MFA, and every write verified on chain before the command returns.
 
-It runs against the **ENSv2 Sepolia beta** only. Mainnet is refused until a canonical production deployment exists.
+ENSv2 went live on **Ethereum mainnet** on 2026-10-27, and the plugin pins it: `--deployment mainnet` works for everything but ERC-8004 agent binding, which has no adapter on L1 yet. The default stays ENS Labs' canonical **Sepolia** table, because spending real USDC should be asked for rather than defaulted into. See the [deployment table](/reference/deployment).
 
 ## Sixty seconds
 
 ```sh
 mm plugins install @estmcmxci/mm-plugin-ensv2 --accept-permissions
-mm ensv2 status                        # is this chain really serving ENSv2? 5 checks, refuses otherwise
-mm ensv2 faucet                        # 100 test USDC, the beta's payment token
+mm ensv2 status                        # is this chain really serving ENSv2? 8 checks, refuses otherwise
+mm ensv2 faucet                        # 100 test USDC, this deployment's payment token
 mm ensv2 provision myagent --agent-uri https://example.com/agent.json --endpoints web=https://example.com
 mm ensv2 primary set myagent.eth       # the wallet now resolves back to its name
 ```

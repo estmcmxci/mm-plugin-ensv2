@@ -10,18 +10,20 @@
 //   npm run check -- provision-plan <name> <owner> [agentURI|none] [years]
 //
 // Every mode runs against ONE pinned deployment, chosen exactly as the plugin
-// chooses it: `--deployment <beta|hackathon>` anywhere on the command line,
-// else MM_ENSV2_DEPLOYMENT, else `beta`. The flag is stripped from the
-// positional arguments before they are read, so it can go anywhere:
+// chooses it: `--deployment <sepolia|mainnet|hackathon|beta>` anywhere on the
+// command line, else MM_ENSV2_DEPLOYMENT, else `sepolia`. The flag is stripped
+// from the positional arguments before they are read, so it can go anywhere:
 //
-//   npm run check -- --deployment hackathon status
-//   npm run check -- whois grilledcheese.eth --deployment hackathon
+//   npm run check -- --deployment mainnet status
+//   npm run check -- whois nick.eth --deployment mainnet
 //   MM_ENSV2_DEPLOYMENT=hackathon npm run check -- deploy-plan 0x…
 //
-// ETH_RPC_URL overrides the endpoint.
+// The endpoint follows the deployment's chain (mainnet or Sepolia public node);
+// ETH_RPC_URL overrides it. Reads only — this script never signs anything, so
+// pointing it at mainnet spends nothing.
 import { createPublicClient, http } from "viem";
 import { DEPLOYMENTS, DEFAULT_DEPLOYMENT_KEY, DEPLOYMENT_KEYS } from "../dist/lib/deployments.js";
-import { detectEnsV2, selfCheck } from "../dist/lib/ensv2.js";
+import { defaultRpcUrl, detectEnsV2, selfCheck } from "../dist/lib/ensv2.js";
 import { resolveQuery, resolverInfo, whois } from "../dist/lib/reads.js";
 import { buildDeployPlan, ownedResolverStatus } from "../dist/lib/resolver.js";
 import { agentInfo, bindPlan, findAgentIdsForName, setUriPlan } from "../dist/lib/agent.js";
@@ -40,9 +42,6 @@ import { MemoryJobStore, redactJobFile } from "../dist/lib/jobs.js";
 import { PlanRefused, observeJob, planProvision, stepsFor } from "../dist/lib/provision.js";
 import { SCHEMA_IDS, validateSchema } from "../dist/lib/schema.js";
 
-const rpc = process.env.ETH_RPC_URL ?? "https://ethereum-sepolia-rpc.publicnode.com";
-const client = createPublicClient({ transport: http(rpc) });
-
 // --- deployment selection: flag > env > default, same precedence as the plugin.
 const rawArgs = process.argv.slice(2);
 const argv = [];
@@ -59,7 +58,11 @@ if (!DEPLOYMENT) {
   process.exit(2);
 }
 const [cmd = "status", arg] = argv;
-console.error(`[deployment ${DEPLOYMENT.key} — ${DEPLOYMENT.deploymentId}, generation ${DEPLOYMENT.generation}, chain ${DEPLOYMENT.chainId}]`);
+// The endpoint follows the deployment's own chain; mainnet tables must not be
+// read through a Sepolia node, which would answer plausibly and wrongly.
+const rpc = process.env.ETH_RPC_URL ?? defaultRpcUrl(DEPLOYMENT.chainId);
+const client = createPublicClient({ transport: http(rpc) });
+console.error(`[deployment ${DEPLOYMENT.key} — ${DEPLOYMENT.deploymentId}, generation ${DEPLOYMENT.generation}, chain ${DEPLOYMENT.chainId}, rpc ${rpc}]`);
 
 const show = (o) => console.log(JSON.stringify(o, (_, v) => (typeof v === "bigint" ? v.toString() : v), 2));
 const need = (v, what) => {

@@ -36,10 +36,10 @@ import {
   type Hex,
   type PublicClient,
 } from "viem";
-import { sepolia } from "viem/chains";
+import { mainnet, sepolia } from "viem/chains";
 import { labelhash } from "viem/ens";
 import { registryAbi, universalHelperAbi, universalResolverAbi } from "./abis.js";
-import type { EnsV2Deployment } from "./deployments.js";
+import { contractSurface, type EnsV2Deployment } from "./deployments.js";
 import { V2Status } from "./ensv2.js";
 import { dnsDecode, dnsEncode, leafLabel, normalizeName } from "./names.js";
 
@@ -59,12 +59,25 @@ export class ReadError extends Error {
  * find the Universal Resolver on it. Reuse its transport (and therefore the
  * host's authenticated RPC) under a chain-aware client. Same pattern as
  * MetaMask/agent-wallet-plugin-examples#5.
+ *
+ * Only the two chains this plugin pins a deployment on. The chain definition
+ * is what viem reads `contracts.ensUniversalResolver` from, so an unknown
+ * chain must refuse here rather than resolve against a default.
+ *
+ * Note that the resolver address in viem's own definitions is NOT what gets
+ * used: every caller overrides `universalResolverAddress` with the pinned
+ * deployment's entry point. The chain object is for the id and the shape.
  */
 export function ensClient(host: PublicClient, chainId: number): PublicClient {
-  if (chainId !== sepolia.id) {
-    throw new ReadError("ENSV2_UNSUPPORTED_CHAIN", `No chain definition for chain ${chainId}.`, "ENSv2 is Sepolia-only (11155111).");
+  const chain = chainId === sepolia.id ? sepolia : chainId === mainnet.id ? mainnet : null;
+  if (!chain) {
+    throw new ReadError(
+      "ENSV2_UNSUPPORTED_CHAIN",
+      `No chain definition for chain ${chainId}.`,
+      `ENSv2 is pinned on Ethereum mainnet (${mainnet.id}) and Sepolia (${sepolia.id}).`,
+    );
   }
-  return createPublicClient({ chain: sepolia, transport: custom(host.transport) });
+  return createPublicClient({ chain, transport: custom(host.transport) });
 }
 
 const hex = (n: bigint): Hex => `0x${n.toString(16)}`;
@@ -74,21 +87,22 @@ const orNull = (a: Address): Address | null => (isAddressEqual(a, zeroAddress) ?
  * Where registry navigation (findCanonicalRegistry / findParentRegistry /
  * findExactRegistry) lives for this deployment.
  *
- * g1: the Universal Resolver answers them itself.
- * g2: they moved to UniversalHelper — the g2 UR REVERTS on them (verified live
- *     2026-09-04). Resolution itself (findResolver / resolve / reverse) stays
- *     on the UR on both generations.
+ * g1:    the Universal Resolver answers them itself.
+ * g2/g3: they moved to UniversalHelper — those URs REVERT on them (verified
+ *        live on g2 2026-09-04, and on both g3 deployments 2026-10-27).
+ *        Resolution itself (findResolver / resolve / reverse) stays on the UR
+ *        on every generation.
  *
- * Throws rather than silently reading the wrong contract if a g2 table is
- * missing its helper; the gate refuses such a table first, this is the
- * belt-and-braces for a caller that skipped it.
+ * Throws rather than silently reading the wrong contract if a helper-based
+ * table is missing its helper; the gate refuses such a table first, this is
+ * the belt-and-braces for a caller that skipped it.
  */
 export function registryNavigator(d: EnsV2Deployment): { address: Address; abi: typeof universalHelperAbi | typeof universalResolverAbi } {
-  if (d.generation === "g2") {
+  if (contractSurface(d) === "g2") {
     if (!d.universalHelper) {
       throw new ReadError(
         "ENSV2_DEPLOYMENT_INCOMPLETE",
-        `Deployment ${d.deploymentId} is generation g2 but declares no universalHelper.`,
+        `Deployment ${d.deploymentId} is generation ${d.generation} but declares no universalHelper.`,
         "Registry navigation on this generation lives on UniversalHelper; refusing to guess.",
       );
     }

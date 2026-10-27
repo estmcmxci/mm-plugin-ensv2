@@ -13,10 +13,11 @@ This is the exact sequence that was run on a fresh wallet for the [evidence](/ev
 
 ```sh
 mm ensv2 status
-mm ensv2 status --chain 1
+mm ensv2 status --deployment mainnet
+mm ensv2 status --chain 8453
 ```
 
-Sepolia: `isV2: true`, 5/5 checks. Mainnet: refused with `ENSV2_UNSUPPORTED_CHAIN`.
+Sepolia (the default): `isV2: true`, 8/8 checks. Mainnet: `isV2: true`, 8/8 — ENSv2 is live on chain 1. Base, or any chain with no pinned deployment: refused with `ENSV2_UNSUPPORTED_CHAIN`.
 
 ### Your resolver
 

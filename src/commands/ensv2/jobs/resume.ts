@@ -2,7 +2,7 @@ import { CommandError, type CommandIO, InputFieldType, type InputSchema, PluginC
 import { isAddressEqual, parseUnits } from "viem";
 import { erc20Abi } from "../../../lib/abis.js";
 import { deploymentByDeploymentId } from "../../../lib/deployments.js";
-import { parseChainId, parseDeploymentKey, requireDeployment, requireEnsV2 } from "../../../lib/gate.js";
+import { resolveTarget, requireDeployment, requireEnsV2 } from "../../../lib/gate.js";
 import { defaultStore, engineDeps, jobErrorToCommandError, summarize } from "../../../lib/hostjobs.js";
 import { runJob } from "../../../lib/provision.js";
 import { selectedEvmAddress } from "../../../lib/wallet.js";
@@ -15,8 +15,8 @@ const inputs = {
   resubmitUnconfirmed: b("resubmit-unconfirmed", "You have confirmed a step recorded as submitted never landed and is not pending; allow it to be sent again"),
   maxSpend: { type: InputFieldType.Text, flag: "max-spend", message: "Raise the job's spend ceiling to this amount in payment-token units (e.g. 8.5); lowering is ignored", required: false, prompt: false },
   verifyRpc: { type: InputFieldType.Text, flag: "verify-rpc", message: "Second, independent RPC URL for the final verification", required: false, prompt: false },
-  chain: { type: InputFieldType.Text, flag: "chain", message: "EVM chain id (default 11155111, Sepolia)", required: false, prompt: false },
-  deployment: { type: InputFieldType.Text, flag: "deployment", message: "ENSv2 deployment: beta (default, the canonical Sepolia beta) or hackathon (ENS Labs' ETHOnline deployment, a newer contract generation)", required: false, prompt: false },
+  chain: { type: InputFieldType.Text, flag: "chain", message: "EVM chain id (default 11155111, Sepolia; 1 for Ethereum mainnet — or just name the deployment, which implies its chain)", required: false, prompt: false },
+  deployment: { type: InputFieldType.Text, flag: "deployment", message: "ENSv2 deployment: sepolia (default, ENS Labs' canonical testnet), mainnet (Ethereum L1 — spends real USDC), hackathon (the ETHOnline 2026 deployment), beta (dead, kept only so old jobs resolve)", required: false, prompt: false },
 } satisfies InputSchema;
 
 /**
@@ -48,8 +48,7 @@ export default class EnsV2JobsResume extends PluginCommand<ProvisionResult> {
     try {
       const file = await store.get(v.jobId.trim());
       if (!file) throw new CommandError("E_JOB_NOT_FOUND", `No job ${v.jobId} in ${store.dir}.`, "Run `mm ensv2 jobs list --all`.");
-      const chainId = parseChainId(v.chain);
-      const deploymentKey = parseDeploymentKey(v.deployment);
+      const { chainId, deploymentKey } = resolveTarget(v.chain, v.deployment);
       if (file.job.chain !== `eip155:${chainId}`) throw new CommandError("E_UNSUPPORTED_NETWORK", `Job ${file.job.jobId} is for ${file.job.chain}, not eip155:${chainId}.`, "Omit --chain or pass the job's chain.");
       // Both pinned deployments live on chain 11155111, so the chain check above
       // does NOT separate them. Refuse here, before any RPC, rather than letting

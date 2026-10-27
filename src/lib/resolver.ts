@@ -57,7 +57,7 @@ import {
   type PublicClient,
 } from "viem";
 import { permissionedResolverAbi, permissionedResolverG2InitAbi, verifiableFactoryAbi } from "./abis.js";
-import type { EnsV2Deployment } from "./deployments.js";
+import { contractSurface, type EnsV2Deployment } from "./deployments.js";
 
 /** EAC packs each role into the low bit of a 4-bit nybble; a 1 in every nybble is the all-roles grant. Mirrors ens-cli ALL_ROLES. */
 export const ALL_ROLES = BigInt("0x1111111111111111111111111111111111111111111111111111111111111111");
@@ -191,15 +191,16 @@ export type DeployPlan = {
  * The resolver initializer this deployment's implementation actually exposes.
  * Pure; the calldata is what the factory forwards to the fresh proxy.
  *
- * g1 `initialize(address admin, uint256 roleBitmap, bytes[] setters)` — 0x7058b559
- * g2 `initialize(Grant[] grants, bytes[] calls)`                      — 0x33cc44a0
+ * g1    `initialize(address admin, uint256 roleBitmap, bytes[] setters)` — 0x7058b559
+ * g2/g3 `initialize(Grant[] grants, bytes[] calls)`                      — 0x33cc44a0
  *
  * The two selectors are mutually absent from each other's implementation
- * bytecode (checked on both, 2026-09-03 / 2026-09-04), so a plan built for the
- * wrong generation reverts rather than half-initialising a resolver.
+ * bytecode (checked on g1 and g2 on 2026-09-03 / 2026-09-04, and on both g3
+ * implementations on 2026-10-27), so a plan built for the wrong generation
+ * reverts rather than half-initialising a resolver.
  */
 export function buildResolverInitData(d: EnsV2Deployment, admin: Address, roleBitmap: bigint, setters: Hex[]): Hex {
-  if (d.generation === "g2") {
+  if (contractSurface(d) === "g2") {
     return encodeFunctionData({
       abi: permissionedResolverG2InitAbi,
       functionName: "initialize",
@@ -211,7 +212,7 @@ export function buildResolverInitData(d: EnsV2Deployment, admin: Address, roleBi
 
 /** The default role bitmap granted to the wallet on a freshly deployed resolver, per generation. */
 export function defaultResolverRoles(d: EnsV2Deployment): bigint {
-  return d.generation === "g2" ? G2_RESOLVER_ROLES : ALL_ROLES;
+  return contractSurface(d) === "g2" ? G2_RESOLVER_ROLES : ALL_ROLES;
 }
 
 /** Unsigned calldata for VerifiableFactory.deployProxy — handed to the wallet executor, never signed here. */

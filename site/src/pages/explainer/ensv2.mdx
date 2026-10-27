@@ -1,17 +1,17 @@
 ---
 title: "ENSv2 in five minutes"
-description: "What changed from ENSv1, why v1 code succeeds at the wrong thing on v2, and the five checks the plugin runs before it touches anything."
+description: "What changed from ENSv1, why v1 code succeeds at the wrong thing on v2, and the checks the plugin runs before it touches anything."
 ---
 
 # ENSv2 in five minutes
 
-ENSv2 is a rewrite of the ENS registry, live as a **beta on Sepolia**. The user-facing story is familiar: `name.eth` resolves to an address and carries records. Almost everything underneath is different.
+ENSv2 is a rewrite of the ENS registry, live on **Ethereum mainnet** since 2026-10-27 and on Sepolia before that. The user-facing story is familiar: `name.eth` resolves to an address and carries records. Almost everything underneath is different.
 
 ## A hierarchy, not a flat map
 
 ENSv1 kept every name in one registry keyed by `namehash`. ENSv2 is a tree of **registries**. The root registry holds top-level labels; the `.eth` registry holds second-level names; each name can have its own subregistry for its subnames. A name's owner, expiry, resolver and roles are read from the registry that *holds* it.
 
-You never walk that tree by hand. The **Universal Resolver** (same address as mainnet, `0xeEeEEEeE14D718C2B47D9923Deab1335E144EeEe`) does it: `findResolver(name)` returns the resolver and how far up the tree it was found, `findParentRegistry(name)` returns the registry that holds the name, `findCanonicalRegistry("eth")` returns the `.eth` registry. Every read in this plugin goes through it, including verification after writes, so the plugin sees what any stranger sees.
+You never walk that tree by hand. The **Universal Resolver** (`0xeEeEEEeE14D718C2B47D9923Deab1335E144EeEe` — the same address on both chains, and the same address ENSv1 used) does it: `findResolver(name)` returns the resolver and how far up the tree it was found, `findParentRegistry(name)` returns the registry that holds the name, `findCanonicalRegistry("eth")` returns the `.eth` registry. Every read in this plugin goes through it, including verification after writes, so the plugin sees what any stranger sees.
 
 ## Your own resolver
 
@@ -19,7 +19,7 @@ There is no shared public resolver you write your records into. Each owner deplo
 
 ## Registration is commit, wait, pay in an ERC-20
 
-Register a `.eth` name by committing to a hash, waiting at least 60 seconds and at most 24 hours, then revealing and paying, in the beta's test USDC rather than ETH. Minimum term is 28 days; the price curve is non-linear and quoted by the registrar itself (one year of `sesquipedalian.eth` was 8.000021 USDC). [Details](/explainer/registration).
+Register a `.eth` name by committing to a hash, waiting at least 60 seconds and at most 24 hours, then revealing and paying, in USDC rather than ETH — test USDC on Sepolia, real USDC on mainnet. Minimum term is 28 days; the price curve is non-linear and quoted by the registrar itself (one year of `sesquipedalian.eth` was 8.000021 USDC). [Details](/explainer/registration).
 
 ## The token id moves
 
@@ -27,15 +27,20 @@ This is the one that bites. A name is a token in its registry, but the token id 
 
 ## Same address, different protocol
 
-The Universal Resolver proxy shares its address with mainnet, and a v1-shaped client will happily call it. So the failure mode of ENSv1 code on ENSv2 is not an error. It is a plausible-looking wrong answer. The plugin therefore **refuses to run** unless five independent checks agree that the chain is serving ENSv2 and that its deployment table matches:
+The Universal Resolver is an upgradeable proxy at one well-known address, and it has served ENSv1, then two ENSv2 generations, then a third — the same address throughout, on both chains. A v1-shaped client will happily call it. So the failure mode of ENSv1 code on ENSv2 is not an error. It is a plausible-looking wrong answer. The plugin therefore **refuses to run** unless eight independent checks agree that the chain is serving the generation its table describes:
 
-1. The Universal Resolver reports the v2 interface (`supportsInterface(0xf99a5e06)`).
-2. `findCanonicalRegistry("eth")` equals the configured `.eth` registry.
-3. The root registry's `getSubregistry("eth")` equals that registry.
-4. That registry's `getParent()` is the root registry with label `eth`.
-5. The resolver factory's `proxyLogic()` equals the configured clone target.
+1. The Universal Resolver reports itself as v2 (`isENSv2()` returns `true`).
+2. It does **not** advertise the g1 interface id `0xf99a5e06`.
+3. It does **not** advertise the g2 interface id `0x1a6cc9f0` either.
+4. `UniversalHelper.findCanonicalRegistry("eth")` equals the configured `.eth` registry.
+5. The root registry's `getSubregistry("eth")` equals that registry.
+6. That registry's `getParent()` is the root registry with label `eth`.
+7. The resolver factory's `proxyLogic()` equals the configured clone target.
+8. `findResolver("eth")` is callable, since every read goes through it.
 
-`mm ensv2 status` prints all five. `--chain 1` is refused outright: no mainnet deployment exists.
+Checks 2 and 3 are the ones that earn their place. The older generations' gates are the mirror image — each asserts the *others'* markers absent — so a table written for one generation can never be accepted against another's contracts. That is not hypothetical: the dead `beta` table names the same Universal Resolver address as the live canonical one, and fails closed on its first check because the proxy was upgraded out from under it.
+
+`mm ensv2 status` prints all eight. A chain with no pinned deployment is refused outright.
 
 ## One lesson from building it
 

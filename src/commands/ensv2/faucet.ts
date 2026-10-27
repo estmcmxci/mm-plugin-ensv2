@@ -10,7 +10,7 @@ import {
 import { formatUnits, parseUnits } from "viem";
 import { erc20Abi } from "../../lib/abis.js";
 import { SEPOLIA_CHAIN_ID } from "../../lib/deployments.js";
-import { parseChainId, parseDeploymentKey, requireEnsV2, toCommandError } from "../../lib/gate.js";
+import { resolveTarget, requireEnsV2, toCommandError } from "../../lib/gate.js";
 import { buildMint, tokenState } from "../../lib/registrar.js";
 import { selectedEvmAddress } from "../../lib/wallet.js";
 
@@ -25,14 +25,14 @@ const inputs = {
   chain: {
     type: InputFieldType.Text,
     flag: "chain",
-    message: "EVM chain id (default 11155111, Sepolia)",
+    message: "EVM chain id (default 11155111, Sepolia; 1 for Ethereum mainnet — or just name the deployment, which implies its chain)",
     required: false,
     prompt: false,
   },
   deployment: {
     type: InputFieldType.Text,
     flag: "deployment",
-    message: "ENSv2 deployment: beta (default, the canonical Sepolia beta) or hackathon (ENS Labs' ETHOnline deployment, a newer contract generation)",
+    message: "ENSv2 deployment: sepolia (default, ENS Labs' canonical testnet), mainnet (Ethereum L1 — spends real USDC), hackathon (the ETHOnline 2026 deployment), beta (dead, kept only so old jobs resolve)",
     required: false,
     prompt: false,
   },
@@ -67,8 +67,7 @@ export default class EnsV2Faucet extends PluginCommand<FaucetResult> {
 
   async execute(io: CommandIO): Promise<FaucetResult> {
     const { amount, chain, deployment: deploymentFlag } = await io.resolveInputs(inputs);
-    const chainId = parseChainId(chain);
-    const deploymentKey = parseDeploymentKey(deploymentFlag);
+    const { chainId, deploymentKey } = resolveTarget(chain, deploymentFlag);
     if (chainId !== SEPOLIA_CHAIN_ID) {
       throw new CommandError("ENSV2_FAUCET_SEPOLIA_ONLY", "The faucet mints a mock token that only exists on Sepolia.", "Omit --chain.");
     }

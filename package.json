@@ -1,8 +1,8 @@
 {
   "name": "@estmcmxci/mm-plugin-ensv2",
-  "version": "0.8.0",
-  "description": "ENSv2 for the MetaMask Agent Wallet CLI (mm): fail-closed, generation-aware detection across two pinned Sepolia deployments, resolution, agent identity, primary names, and durable provisioning jobs",
-  "author": "estmcmxci 𝔪✶ (https://estmcmxci.co)",
+  "version": "0.9.0",
+  "description": "ENSv2 for the MetaMask Agent Wallet CLI (mm): fail-closed, generation-aware detection across four pinned deployments \u2014 ENSv2 on Ethereum mainnet and ENS Labs' canonical Sepolia table \u2014 plus resolution, agent identity, primary names, and durable provisioning jobs",
+  "author": "estmcmxci \ud835\udd2a\u2736 (https://estmcmxci.co)",
   "license": "MIT",
   "homepage": "https://github.com/estmcmxci/mm-plugin-ensv2#readme",
   "repository": {
@@ -23,7 +23,9 @@
     "agent-identity",
     "ensip-25",
     "ensip-26",
-    "sepolia"
+    "sepolia",
+    "mainnet",
+    "ethereum"
   ],
   "engines": {
     "node": ">=20"
@@ -77,7 +79,7 @@
   },
   "mm": {
     "schemaVersion": 1,
-    "minCliVersion": "^6.2.0",
+    "minCliVersion": "^6.2.0 || ^7.0.0",
     "capabilities": [],
     "commands": [
       {
@@ -89,6 +91,7 @@
           "network"
         ],
         "targetChains": [
+          1,
           11155111
         ]
       },
@@ -101,6 +104,7 @@
           "network"
         ],
         "targetChains": [
+          1,
           11155111
         ]
       },
@@ -113,6 +117,7 @@
           "network"
         ],
         "targetChains": [
+          1,
           11155111
         ]
       },
@@ -125,6 +130,7 @@
           "network"
         ],
         "targetChains": [
+          1,
           11155111
         ]
       },
@@ -137,6 +143,7 @@
           "network"
         ],
         "targetChains": [
+          1,
           11155111
         ]
       },
@@ -149,6 +156,7 @@
           "network"
         ],
         "targetChains": [
+          1,
           11155111
         ]
       },
@@ -179,6 +187,7 @@
           "network"
         ],
         "targetChains": [
+          1,
           11155111
         ]
       },
@@ -233,6 +242,7 @@
           "network"
         ],
         "targetChains": [
+          1,
           11155111
         ]
       },
@@ -245,6 +255,7 @@
           "network"
         ],
         "targetChains": [
+          1,
           11155111
         ]
       },
@@ -258,6 +269,7 @@
           "network"
         ],
         "targetChains": [
+          1,
           11155111
         ]
       },
@@ -272,6 +284,7 @@
           "network"
         ],
         "targetChains": [
+          1,
           11155111
         ]
       },
@@ -286,6 +299,7 @@
           "network"
         ],
         "targetChains": [
+          1,
           11155111
         ]
       },
@@ -299,6 +313,7 @@
           "network"
         ],
         "targetChains": [
+          1,
           11155111
         ]
       },
@@ -313,6 +328,7 @@
           "network"
         ],
         "targetChains": [
+          1,
           11155111
         ]
       },
@@ -325,6 +341,7 @@
           "network"
         ],
         "targetChains": [
+          1,
           11155111
         ]
       },
@@ -337,6 +354,7 @@
           "network"
         ],
         "targetChains": [
+          1,
           11155111
         ]
       },
@@ -351,6 +369,7 @@
           "network"
         ],
         "targetChains": [
+          1,
           11155111
         ]
       },
@@ -363,13 +382,14 @@
           "network"
         ],
         "targetChains": [
+          1,
           11155111
         ]
       }
     ]
   },
   "peerDependencies": {
-    "@metamask/agent-wallet": "^6.2.0"
+    "@metamask/agent-wallet": "^6.2.0 || ^7.0.0"
   },
   "dependencies": {
     "viem": "^2.35.0"

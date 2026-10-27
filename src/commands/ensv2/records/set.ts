@@ -10,7 +10,7 @@ import {
 import { readFileSync } from "node:fs";
 import { getAddress, type Address } from "viem";
 import { ensip25Key } from "../../../lib/erc7930.js";
-import { parseChainId, parseDeploymentKey, requireEnsV2, toCommandError } from "../../../lib/gate.js";
+import { resolveTarget, requireEnsV2, requireIdentityRegistry, toCommandError } from "../../../lib/gate.js";
 import {
   defaultContext,
   endpointKey,
@@ -37,8 +37,8 @@ const inputs = {
   contextFile: t("context-file", "path to a file whose contents become agent-context"),
   endpoints: t("endpoints", "agent-endpoint records: mcp=<url>,a2a=<url>,web=<url> (ENSIP-26)"),
   linkAgent: t("link-agent", "ERC-8004 agent id to link via ENSIP-25 (writes agent-registration[<registry>][<id>] = \"1\")"),
-  chain: t("chain", "EVM chain id (default 11155111, Sepolia)"),
-  deployment: t("deployment", "ENSv2 deployment: beta (default, the canonical Sepolia beta) or hackathon (ENS Labs' ETHOnline deployment, a newer contract generation)"),
+  chain: t("chain", "EVM chain id (default 11155111, Sepolia; 1 for Ethereum mainnet — or just name the deployment, which implies its chain)"),
+  deployment: t("deployment", "ENSv2 deployment: sepolia (default, ENS Labs' canonical testnet), mainnet (Ethereum L1 — spends real USDC), hackathon (the ETHOnline 2026 deployment), beta (dead, kept only so old jobs resolve)"),
 } satisfies InputSchema;
 
 type RecordsSetResult = {
@@ -75,8 +75,7 @@ export default class EnsV2RecordsSet extends PluginCommand<RecordsSetResult> {
 
   async execute(io: CommandIO): Promise<RecordsSetResult> {
     const v = await io.resolveInputs(inputs);
-    const chainId = parseChainId(v.chain);
-    const deploymentKey = parseDeploymentKey(v.deployment);
+    const { chainId, deploymentKey } = resolveTarget(v.chain, v.deployment);
     const client = this.ctx.publicClient(chainId);
 
     try {
@@ -107,7 +106,7 @@ export default class EnsV2RecordsSet extends PluginCommand<RecordsSetResult> {
 
       if (v.linkAgent) {
         if (!/^\d+$/.test(v.linkAgent)) throw new CommandError("ENSV2_INVALID_AGENT_ID", `'${v.linkAgent}' is not an agent id.`, "Pass a decimal integer (see `ensv2 agent info`).");
-        desired.texts[ensip25Key(chainId, d.identityRegistry, v.linkAgent)] = "1";
+        desired.texts[ensip25Key(chainId, requireIdentityRegistry(d), v.linkAgent)] = "1";
       }
 
       let context = v.context;

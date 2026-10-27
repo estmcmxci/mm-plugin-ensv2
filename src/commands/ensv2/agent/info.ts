@@ -8,7 +8,7 @@ import {
   schemaToFlags,
 } from "@metamask/agent-wallet/plugin";
 import { agentInfo, findAgentIdsForName, type AgentInfo } from "../../../lib/agent.js";
-import { parseChainId, parseDeploymentKey, requireEnsV2, toCommandError } from "../../../lib/gate.js";
+import { resolveTarget, requireAgentIdentity, requireEnsV2, toCommandError } from "../../../lib/gate.js";
 
 const inputs = {
   name: {
@@ -28,14 +28,14 @@ const inputs = {
   chain: {
     type: InputFieldType.Text,
     flag: "chain",
-    message: "EVM chain id (default 11155111, Sepolia)",
+    message: "EVM chain id (default 11155111, Sepolia; 1 for Ethereum mainnet — or just name the deployment, which implies its chain)",
     required: false,
     prompt: false,
   },
   deployment: {
     type: InputFieldType.Text,
     flag: "deployment",
-    message: "ENSv2 deployment: beta (default, the canonical Sepolia beta) or hackathon (ENS Labs' ETHOnline deployment, a newer contract generation)",
+    message: "ENSv2 deployment: sepolia (default, ENS Labs' canonical testnet), mainnet (Ethereum L1 — spends real USDC), hackathon (the ETHOnline 2026 deployment), beta (dead, kept only so old jobs resolve)",
     required: false,
     prompt: false,
   },
@@ -63,11 +63,12 @@ export default class EnsV2AgentInfo extends PluginCommand<AgentInfoResult> {
 
   async execute(io: CommandIO): Promise<AgentInfoResult> {
     const { name, agentId: agentIdRaw, chain, deployment: deploymentFlag } = await io.resolveInputs(inputs);
-    const chainId = parseChainId(chain);
-    const deploymentKey = parseDeploymentKey(deploymentFlag);
+    const { chainId, deploymentKey } = resolveTarget(chain, deploymentFlag);
     const client = this.ctx.publicClient(chainId);
     try {
-      const { deployment: d } = await requireEnsV2(client, chainId, deploymentKey);
+      const { deployment: table } = await requireEnsV2(client, chainId, deploymentKey);
+      // ERC-8004 agent work needs an Adapter8004; mainnet has none.
+      const d = requireAgentIdentity(table);
 
       let agentId: bigint;
       let discoveredBy: "flag" | "event-scan";
