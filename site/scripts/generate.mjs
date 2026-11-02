@@ -91,8 +91,8 @@ const labels = {
   resolverImplementation: "PermissionedResolver implementation",
   resolverProxyLogic: "Factory clone target (ERC-1167 proxy logic)",
   subregistryImplementation: "UserRegistry implementation",
-  adapter8004: "Adapter8004 proxy (unruggable-labs/adapter) — mints + binds ERC-8004 agents. The same contract wherever it is deployed.",
-  identityRegistry: "ERC-8004 IdentityRegistry — the canonical one, at the same address and behind the same implementation on both chains.",
+  adapter8004: "Adapter8004 proxy (unruggable-labs/adapter) — mints + binds ERC-8004 agents. One deployment per chain: the same proxy bytecode, a different address and implementation on each.",
+  identityRegistry: "ERC-8004 IdentityRegistry — this chain's, as reported by the adapter's own identityRegistry(). The two chains use different registries.",
   reverseRegistrar: "v1 ReverseRegistrar — owner of addr.reverse in the v1 registry this deployment mirrors",
 };
 const notes = {
@@ -106,9 +106,9 @@ const notes = {
   mainnet: {
     title: "`mainnet` — ENSv2 on Ethereum L1",
     blurb:
-      "Generation **g3**, chain **1**. ENSv2 went live on mainnet on 2026-10-27; Namechain was cancelled in February 2026 and ENSv2 shipped on L1 instead. Live and serving: `isENSv2()` is true, the registry hierarchy is consistent in both directions, migrated names answer from the v2 `.eth` registry and unmigrated ones fall through to `ENSV1Resolver`. **Registration spends real USDC or DAI** — about $8.00 a year for a free label. There is **no `Adapter8004` on chain 1**, so ERC-8004 agents cannot be minted or bound here and the `agent *` commands refuse by name; the canonical ERC-8004 registry itself *is* live, so ENSIP-25 records still derive and read.",
+      "Generation **g3**, chain **1**. ENSv2 went live on mainnet on 2026-10-27; Namechain was cancelled in February 2026 and ENSv2 shipped on L1 instead. Live and serving: `isENSv2()` is true, the registry hierarchy is consistent in both directions, migrated names answer from the v2 `.eth` registry and unmigrated ones fall through to `ENSV1Resolver`. **Registration spends real USDC or DAI** — about $8.00 a year for a free label, and no faucet. ERC-8004 agents **can** be minted and bound here: the adapter is at `0xde152AfB…`, its own address rather than Sepolia's `0x7621630c…`, and chain 1 has its own ERC-8004 IdentityRegistry to match. Through 0.9.0 this plugin tested Sepolia's adapter address against mainnet, read back no code, and refused the `agent *` commands on L1 as a result.",
     provenance:
-      "Provenance: the *Mainnet (ENSv2)* table at [docs.ens.domains/learn/deployments](https://docs.ens.domains/learn/deployments), row for row, agreed independently by [`ensdomains/ensjs`](https://github.com/ensdomains/ensjs/blob/main/packages/ensjs/src/clients/chain.ts). Where sources disagree, the table follows the two that agree: `ens-cli` records a different `subregistryImplementation` (`0x75FF9AdB…`), a field this plugin reads nowhere. Every derivable value was re-derived live on 2026-10-27 at block 26285436.",
+      "Provenance: the *Mainnet (ENSv2)* table at [docs.ens.domains/learn/deployments](https://docs.ens.domains/learn/deployments), row for row, agreed independently by [`ensdomains/ensjs`](https://github.com/ensdomains/ensjs/blob/main/packages/ensjs/src/clients/chain.ts). Where sources disagree, the table follows the two that agree: `ens-cli` records a different `subregistryImplementation` (`0x75FF9AdB…`), a field this plugin reads nowhere. Every derivable value was re-derived live on 2026-10-27 at block 26285436, and the adapter and this chain's ERC-8004 registry again on 2026-11-02 — the adapter has been live since block 26285388, 48 blocks before that first derivation.",
   },
   hackathon: {
     title: "`hackathon` — ENS Labs' ETHOnline 2026 deployment",
@@ -140,7 +140,7 @@ dm += `| registry navigation | on the Universal Resolver | on a separate \`Unive
 dm += `| resolver record setters | \`setAddr\`/\`setText(bytes32 node, …)\` | \`setAddress\`/\`setText(bytes dnsName, …)\` | same as g2 |\n`;
 dm += `| resolver initializer | \`initialize(address,uint256,bytes[])\` | \`initialize(Grant[],bytes[])\` | same as g2 |\n`;
 dm += `| forward + reverse resolution | \`findResolver\` / \`resolve\` / \`reverse\` on the UR | identical | identical |\n`;
-dm += `| ERC-8004 binding | yes | yes | Sepolia only — no adapter on chain 1 |\n\n`;
+dm += `| ERC-8004 binding | yes | yes | yes — mainnet's adapter is its own address, not Sepolia's |\n\n`;
 dm += `**g3 is g2's contracts.** The deployed bytecode was compared selector by selector on 2026-10-27: \`ETHRegistrar\` is the same 8037 bytes with the same entry points on all three g2/g3 deployments, \`PermissionedResolverImpl\` exposes exactly the same setters and initializer, \`VerifiableFactory\` and \`ETHRegistry\` match to the byte. One set of encoders serves both; g3 is a separate generation only because its Universal Resolver stopped advertising the g2 ERC-165 id while still answering \`isENSv2()\`.\n\n`;
 dm += `Addresses are never trusted blindly. \`mm ensv2 status\` re-derives the \`.eth\` registry from the deployment's own navigation surface and refuses to run if the table disagrees; the resolver factory's clone target, the adapter's implementation (EIP-1967 slot) and the reverse registrar (root → \`reverse\` TLD resolver → v1 registry → \`owner(addr.reverse)\`) are each re-derived on use.\n`;
 

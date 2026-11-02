@@ -202,6 +202,7 @@
           "network"
         ],
         "targetChains": [
+          1,
           11155111
         ]
       },
@@ -214,6 +215,7 @@
           "network"
         ],
         "targetChains": [
+          1,
           11155111
         ]
       },
@@ -228,6 +230,7 @@
           "network"
         ],
         "targetChains": [
+          1,
           11155111
         ]
       },

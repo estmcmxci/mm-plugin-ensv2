@@ -7,19 +7,23 @@ description: "ENSv2 names and ERC-8004 agent identity, natively inside the MetaM
 
 `@estmcmxci/mm-plugin-ensv2` is a plugin for the MetaMask Agent Wallet CLI. It gives `mm` a native `ensv2` topic: an agent wallet can **register an ENSv2 name it owns, deploy its own resolver, mint an ERC-8004 agent bound to that name, publish the ENSIP-25/26 records that make it discoverable, and set the name as its primary name** — with every signature routed through MetaMask policy and MFA, and every write verified on chain before the command returns.
 
-ENSv2 went live on **Ethereum mainnet** on 2026-10-27, and the plugin pins it: `--deployment mainnet` works for everything but ERC-8004 agent binding, which has no adapter on L1 yet. The default stays ENS Labs' canonical **Sepolia** table, because spending real USDC should be asked for rather than defaulted into. See the [deployment table](/reference/deployment).
+ENSv2 went live on **Ethereum mainnet** on 2026-10-27, and the plugin pins it: `--deployment mainnet` works for everything, ERC-8004 agent binding included. The default stays ENS Labs' canonical **Sepolia** table, because spending real USDC should be asked for rather than defaulted into. See the [deployment table](/reference/deployment).
 
 ## Sixty seconds
+
+On the default **`sepolia`** deployment — the faucet below is testnet-only.
 
 ```sh
 mm config set experimentalPlugins true
 npm pack @estmcmxci/mm-plugin-ensv2    # the tarball, not the name: installing by name silently fails
 mm plugins install file:$PWD/estmcmxci-mm-plugin-ensv2-0.9.0.tgz --accept-permissions
 mm ensv2 status                        # is this chain really serving ENSv2? 8 checks, refuses otherwise
-mm ensv2 faucet                        # 100 test USDC, this deployment's payment token
+mm ensv2 faucet                        # Sepolia MockUSDC, open mint — no mainnet equivalent
 mm ensv2 provision myagent --agent-uri https://example.com/agent.json --endpoints web=https://example.com
 mm ensv2 primary set myagent.eth       # the wallet now resolves back to its name
 ```
+
+On **mainnet** the same commands work with `--deployment mainnet`, minus the faucet: registration spends real USDC, about $8.00 a year, and there is no open `mint` to call.
 
 Install the **tarball**, not the package name: a by-name install is reported as installed and then silently removed, on both Agent Wallet 6.2.0 and 7.3.0. [Install](/install) has both working forms and the rest of the host quirks.
 
