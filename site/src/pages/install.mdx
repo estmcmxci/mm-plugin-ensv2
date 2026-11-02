@@ -19,17 +19,17 @@ Install the published **tarball**, not the package name — see [the registry-in
 ```sh
 mm config set experimentalPlugins true
 npm pack @estmcmxci/mm-plugin-ensv2
-mm plugins install file:$PWD/estmcmxci-mm-plugin-ensv2-0.9.0.tgz --accept-permissions
+mm plugins install file:$PWD/estmcmxci-mm-plugin-ensv2-0.10.0.tgz --accept-permissions
 mm ensv2 status
 ```
 
 `npm pack` downloads the exact artifact the registry serves — same bytes, same provenance attestation — and leaves it in the working directory. A one-line equivalent, if you would rather not keep the file, points the host straight at the registry's tarball URL:
 
 ```sh
-mm plugins install https://registry.npmjs.org/@estmcmxci/mm-plugin-ensv2/-/mm-plugin-ensv2-0.9.0.tgz --accept-permissions
+mm plugins install https://registry.npmjs.org/@estmcmxci/mm-plugin-ensv2/-/mm-plugin-ensv2-0.10.0.tgz --accept-permissions
 ```
 
-Both were verified against 0.9.0 on CLI 6.2.0 and 7.3.0.
+Both forms were verified on CLI 6.2.0 and 7.3.0 against 0.9.0, the published artifact at the time.
 
 `--accept-permissions` consents to the capabilities the plugin declares: `wallet-read` for every command, `wallet-submit` only for the commands that send a transaction. The consent screen lists them per command.
 
@@ -53,7 +53,7 @@ mm plugins install file:$PWD/estmcmxci-mm-plugin-ensv2-<version>.tgz --accept-pe
 Agent Wallet 6.2.0 does not refresh a plugin's consent record when a new version is installed over an approved one, so new commands stay unapproved. Uninstall, then install.
 ```sh
 mm plugins uninstall @estmcmxci/mm-plugin-ensv2
-mm plugins install file:$PWD/estmcmxci-mm-plugin-ensv2-0.9.0.tgz --accept-permissions
+mm plugins install file:$PWD/estmcmxci-mm-plugin-ensv2-0.10.0.tgz --accept-permissions
 ```
 :::
 
@@ -61,7 +61,7 @@ mm plugins install file:$PWD/estmcmxci-mm-plugin-ensv2-0.9.0.tgz --accept-permis
 On some networks the host's bundled npm hangs on an IPv6 socket during install or uninstall. Prefix whichever command is fetching:
 ```sh
 NODE_OPTIONS=--dns-result-order=ipv4first npm pack @estmcmxci/mm-plugin-ensv2
-NODE_OPTIONS=--dns-result-order=ipv4first mm plugins install file:$PWD/estmcmxci-mm-plugin-ensv2-0.9.0.tgz --accept-permissions
+NODE_OPTIONS=--dns-result-order=ipv4first mm plugins install file:$PWD/estmcmxci-mm-plugin-ensv2-0.10.0.tgz --accept-permissions
 ```
 :::
 
