@@ -25,3 +25,13 @@ This was not tested by pressing Ctrl-C. During the fresh-wallet run in the [evid
 ## What `whois` shows afterwards
 
 Status, expiry, owner, the token id, the canonical id, the registration epoch, the resolver and the subregistry, all read through the registry the Universal Resolver says holds the name. Owner is reported only while `REGISTERED`: the registry's `latestOwner` is stale after expiry and the plugin does not repeat it.
+
+:::warning[`AVAILABLE` is the registry's word, not the registrar's]
+`status` is the registry's own `IPermissionedRegistry.Status`, and it flips to `AVAILABLE` the moment `expiry` passes. The registry has no concept of a grace period, so a **lapsed name reads `AVAILABLE` while the registrar still refuses to sell it** and the previous owner can still renew. `whois` therefore also reports `registrable`, which asks the registrar's `isAvailable` directly — the question people actually mean — and the text hint spells out the disagreement rather than leaving it to be discovered at the till:
+
+```
+enfants.eth — AVAILABLE, expired 2026-10-20, but NOT registrable — in grace or reserved; the registrar refuses it
+```
+
+`registrable` is `null` for anything the `.eth` registrar does not govern, such as a subname under a user registry. Spend decisions belong to `registrable` or to `ensv2 available`, never to `status` alone.
+:::

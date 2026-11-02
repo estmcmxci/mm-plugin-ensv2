@@ -10,6 +10,9 @@
  *    by assuming the .eth registry. A subname's entry lives in its parent's
  *    subregistry; reading the root for it returns a plausible-looking
  *    "AVAILABLE" for a name that is in fact registered.
+ *  - getState().status is also "AVAILABLE" for a LAPSED name still inside its
+ *    grace period, which the registrar will not sell. `registrable` asks the
+ *    registrar; never answer "can I register this?" from `status` alone.
  *  - getState().latestOwner is stale after expiry (it bypasses the
  *    expiry-aware ownerOf). Report `owner` only while REGISTERED.
  *  - tokenId is not a stable identifier; it changes on any role grant or
@@ -38,7 +41,7 @@ import {
 } from "viem";
 import { mainnet, sepolia } from "viem/chains";
 import { labelhash } from "viem/ens";
-import { registryAbi, universalHelperAbi, universalResolverAbi } from "./abis.js";
+import { ethRegistrarAbi, registryAbi, universalHelperAbi, universalResolverAbi } from "./abis.js";
 import { contractSurface, type EnsV2Deployment } from "./deployments.js";
 import { V2Status } from "./ensv2.js";
 import { dnsDecode, dnsEncode, leafLabel, normalizeName } from "./names.js";
@@ -193,6 +196,17 @@ export type WhoisInfo = {
   registrationEpoch: number | null;
   /** Non-zero token version => this label was registered in v2 before (explicit unregister bumps it). */
   hasRegistrationHistory: boolean;
+  /**
+   * Whether the REGISTRAR will actually sell this name right now.
+   *
+   * `status` is the registry's own `IPermissionedRegistry.Status`, which flips
+   * to AVAILABLE the instant `expiry` passes and knows nothing about the grace
+   * period — so a lapsed name reads AVAILABLE here while the registrar still
+   * refuses it and `getRegisterPrice` reverts `NameNotAvailable`. Only the
+   * registrar can answer the question people actually mean. null for anything
+   * the `.eth` registrar does not govern (subnames, other registries).
+   */
+  registrable: boolean | null;
   resolver: Address | null;
   subregistry: Address | null;
 };
@@ -212,10 +226,16 @@ export async function whois(client: PublicClient, d: EnsV2Deployment, rawName: s
 
   const label = leafLabel(name);
   const anyId = BigInt(labelhash(label));
-  const [state, resolver, subregistry] = await Promise.all([
+  // The registrar only governs 2LDs in this deployment's canonical `.eth`
+  // registry; for anything else `registrable` is not a question it can answer.
+  const governed = isAddressEqual(registryAddr, d.registry);
+  const [state, resolver, subregistry, registrable] = await Promise.all([
     client.readContract({ address: registryAddr, abi: registryAbi, functionName: "getState", args: [anyId] }),
     client.readContract({ address: registryAddr, abi: registryAbi, functionName: "getResolver", args: [label] }),
     client.readContract({ address: registryAddr, abi: registryAbi, functionName: "getSubregistry", args: [label] }),
+    governed
+      ? client.readContract({ address: d.registrar, abi: ethRegistrarAbi, functionName: "isAvailable", args: [label] })
+      : Promise.resolve(null),
   ]);
 
   const status = state.status as V2Status;
@@ -236,6 +256,7 @@ export async function whois(client: PublicClient, d: EnsV2Deployment, rawName: s
     resource: hex(state.resource),
     registrationEpoch: registered ? Number(state.resource & 0xffff_ffffn) : null,
     hasRegistrationHistory: (state.tokenId & 0xffff_ffffn) !== 0n,
+    registrable,
     resolver: orNull(resolver),
     subregistry: orNull(subregistry),
   };

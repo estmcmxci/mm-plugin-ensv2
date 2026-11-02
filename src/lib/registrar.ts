@@ -15,13 +15,13 @@
  *    read from chain here rather than assumed.
  */
 import {
-  BaseError,
-  ContractFunctionRevertedError,
+  decodeErrorResult,
   encodeFunctionData,
   formatUnits,
   toHex,
   zeroAddress,
   zeroHash,
+  type Abi,
   type Address,
   type Hex,
   type PublicClient,
@@ -33,12 +33,62 @@ import { ReadError } from "./reads.js";
 
 export const SECONDS_PER_YEAR = 365n * 86400n;
 
-/** Surface a decoded custom error by name; leave anything else to the caller. */
-export function revertName(error: unknown): { name: string; args: readonly unknown[] } | null {
-  if (!(error instanceof BaseError)) return null;
-  const r = error.walk((e) => e instanceof ContractFunctionRevertedError) as ContractFunctionRevertedError | null;
-  if (!r?.data?.errorName) return null;
-  return { name: r.data.errorName, args: r.data.args ?? [] };
+/**
+ * Surface a decoded custom error by name; leave anything else to the caller.
+ *
+ * NEVER use `instanceof` here. The host bundles its own copy of viem into its
+ * dist, and `ctx.publicClient()` builds the client with THAT copy, so an error
+ * it throws is an instance of the host's `BaseError` class, not this package's.
+ * `error instanceof BaseError` is therefore always false in production and was
+ * silently turning `NameNotAvailable` into a generic ENSV2_RPC_ERROR telling
+ * the user to go check their RPC endpoint.
+ *
+ * So: walk the chain structurally, and decode the raw revert data with OUR abi
+ * rather than trusting whatever the host's viem attached. That holds whether
+ * the host decoded the error, failed to, or wrapped it in a class we have
+ * never seen.
+ */
+export function revertName(error: unknown, abi: Abi = ethRegistrarAbi): { name: string; args: readonly unknown[] } | null {
+  for (const node of errorChain(error)) {
+    // A host-decoded custom error, read by shape rather than by class.
+    const data = (node as { data?: { errorName?: unknown; args?: unknown } }).data;
+    if (data && typeof data.errorName === "string") {
+      return { name: data.errorName, args: Array.isArray(data.args) ? data.args : [] };
+    }
+    // Otherwise find the raw revert payload and decode it ourselves.
+    const raw = revertData(node);
+    if (!raw) continue;
+    try {
+      const decoded = decodeErrorResult({ abi, data: raw });
+      return { name: decoded.errorName, args: (decoded.args ?? []) as readonly unknown[] };
+    } catch {
+      // Not one of ours (or not a custom error at all) — keep walking.
+    }
+  }
+  return null;
+}
+
+/** Every error in a `cause` chain, plus viem's own `walk()` if the node offers one. */
+function errorChain(error: unknown): unknown[] {
+  const seen = new Set<unknown>();
+  const out: unknown[] = [];
+  const push = (e: unknown) => {
+    if (e == null || typeof e !== "object" || seen.has(e)) return;
+    seen.add(e);
+    out.push(e);
+    push((e as { cause?: unknown }).cause);
+  };
+  push(error);
+  return out;
+}
+
+/** The 0x-prefixed revert payload, wherever this error shape happens to keep it. */
+function revertData(node: unknown): Hex | null {
+  const n = node as { data?: unknown; raw?: unknown; details?: unknown };
+  for (const candidate of [n.data, (n.data as { data?: unknown } | undefined)?.data, n.raw]) {
+    if (typeof candidate === "string" && /^0x[0-9a-fA-F]{8,}$/.test(candidate)) return candidate as Hex;
+  }
+  return null;
 }
 
 export type Availability = {
