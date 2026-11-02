@@ -4,7 +4,7 @@
 
 ENSv2 names and ERC-8004 agent identity, natively inside the [MetaMask Agent Wallet](https://docs.metamask.io/agent-wallet/) CLI (`mm`). An agent wallet can register an ENSv2 name it owns, deploy its own resolver, mint an ERC-8004 agent bound to that name, publish the ENSIP-25/26 records that make it discoverable, and set the name as its primary name — every signature routed through MetaMask policy and MFA, every write verified on chain before the command returns.
 
-**Mainnet and Sepolia, fail-closed on both.** ENSv2 went live on Ethereum mainnet on 2026-10-27, and this plugin pins it: `--deployment mainnet` (chain 1) works for everything but ERC-8004 agent binding, which has no adapter on L1 yet. The default stays `sepolia` — ENS Labs' canonical testnet table — because spending real USDC should be something you ask for, not something you get by omission. Two older Sepolia tables remain pinned (`hackathon`, and the dead `beta`) so existing jobs still resolve; see [Which deployment](#which-deployment). The plugin never falls back to ENSv1 behaviour, on any chain. Docs, explainer and live evidence: **https://mm-ensv2.estmcmxci.co** (every page is also Markdown: append `.md`, or fetch `/llms.txt`).
+**Mainnet and Sepolia, fail-closed on both.** ENSv2 went live on Ethereum mainnet on 2026-10-27, and this plugin pins it: `--deployment mainnet` (chain 1) works for everything, ERC-8004 agent binding included. The default stays `sepolia` — ENS Labs' canonical testnet table — because spending real USDC should be something you ask for, not something you get by omission. Two older Sepolia tables remain pinned (`hackathon`, and the dead `beta`) so existing jobs still resolve; see [Which deployment](#which-deployment). The plugin never falls back to ENSv1 behaviour, on any chain. Docs, explainer and live evidence: **https://mm-ensv2.estmcmxci.co** (every page is also Markdown: append `.md`, or fetch `/llms.txt`).
 
 ## Sixty seconds
 
@@ -78,7 +78,7 @@ Four deployments are pinned. Pick one with `--deployment`, available on every co
 | Deployment id | `ensv2-sepolia-2026-10-01` | `ensv2-mainnet-2026-10-18` | `ensv2-sepolia-hackathon-2026-09` | `ensv2-sepolia-2026-07-30` |
 | Generation | **g3** | **g3** | g2 | g1 |
 | Payment token | MockUSDC (open `mint`, use `faucet`) | **real USDC** (and real DAI) | its own MockUSDC | its own MockUSDC |
-| ERC-8004 binding | yes | **no** — no `Adapter8004` on chain 1 | yes | yes |
+| ERC-8004 binding | yes | yes | yes | yes |
 | Gate | 8 checks, passing | 8 checks, passing | 7 checks, passing | 5 checks, **failing — correctly** |
 | Use it when | by default, for everything | you want a real name on L1 | you have names or agents there already | never; it is kept only so old jobs resolve |
 
@@ -107,7 +107,7 @@ export MM_ENSV2_DEPLOYMENT=mainnet         # …or set it once for the session
 
 **Names and agents are per deployment.** A registration, a resolver, a primary name and an ERC-8004 binding all belong to the deployment they were made on. `mm ensv2 whois agent.eth` and `mm ensv2 whois agent.eth --deployment mainnet` are two different questions with two different answers; a name taken on one may well be free on the other; and a provisioning job created under one deployment refuses to resume under another (`E_UNSUPPORTED_DEPLOYMENT`). Each Sepolia deployment has its own test USDC, so `mm ensv2 faucet --deployment hackathon` mints a *different* token from the canonical table's.
 
-**What mainnet cannot do.** `Adapter8004` (`0x7621630c…`) has no code on chain 1, so nothing can be minted or bound there: `agent register`, `agent info` and `agent set-uri` refuse with `ENSV2_NO_AGENT_IDENTITY`, `records set --link-agent` has no binding to link, and `provision` refuses an intent that asks for `identity: erc8004` (run it with `--no-identity`). The manifest declares those three commands Sepolia-only, so the host refuses them on chain 1 before the plugin runs. `faucet` is Sepolia-only for the same kind of reason: real USDC has no open `mint`. The canonical ERC-8004 IdentityRegistry *is* live on mainnet, so ENSIP-25 keys still derive and read there — it is only the binding adapter that is missing. When it ships, pinning it is a one-line table edit.
+**What mainnet does differently.** Agent binding works here, and through 0.9.0 it did not. `Adapter8004` is live on chain 1 at `0xde152AfB…` — *not* the Sepolia address `0x7621630c…`, which has no code on mainnet. This plugin tested the Sepolia address against chain 1, concluded there was no adapter, omitted it from the table, and refused `agent register`, `agent info` and `agent set-uri` on L1 for no reason; the manifest declared those three Sepolia-only on top of that, so the host refused them before the plugin even ran. Both are fixed. Each chain also has its **own** ERC-8004 IdentityRegistry — `0x8004A169FB…` on mainnet, `0x8004A818BF…` on Sepolia, picked by the adapter's own `identityRegistry()` — and 0.9.0 pinned Sepolia's for mainnet, so an ENSIP-25 key written on L1 pointed readers at a registry no mainnet agent appears in. What is genuinely mainnet-only: registration spends **real USDC** (about $8.00 a year), and `faucet` stays Sepolia-only because real USDC has no open `mint`.
 
 ## Commands
 

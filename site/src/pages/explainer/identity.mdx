@@ -13,7 +13,7 @@ The **IdentityRegistry** (`0x8004A818…BD9e` on Sepolia) mints one NFT per agen
 
 ## Adapter8004: mint and bind in one transaction
 
-`mm ensv2 agent register NAME.eth --uri URI` calls the **Adapter8004** proxy (`0x7621630c…2f92`, by unruggable-labs), which registers a new agent on the IdentityRegistry, keeps the agent NFT itself, and records an immutable binding `(standard, tokenContract, tokenId)` to your name's token in the `.eth` registry. Control is then derived on every call: you are the agent's controller because you own the name. `mm ensv2 agent info` reads the binding back, checks the registry's current token id against it, checks `isController`, and finds the NFT held by the adapter.
+`mm ensv2 agent register NAME.eth --uri URI` calls the **Adapter8004** proxy (by unruggable-labs — `0x7621630c…2f92` on Sepolia, `0xde152AfB…dD336` on mainnet; the same proxy bytecode, one deployment per chain), which registers a new agent on the IdentityRegistry, keeps the agent NFT itself, and records an immutable binding `(standard, tokenContract, tokenId)` to your name's token in the `.eth` registry. Control is then derived on every call: you are the agent's controller because you own the name. `mm ensv2 agent info` reads the binding back, checks the registry's current token id against it, checks `isController`, and finds the NFT held by the adapter.
 
 Before building this, the adapter's live implementation was pinned from the proxy's EIP-1967 slot and its bytecode checked for the exact `register(uint8,address,uint256,string)` it exposes. The adapter's source repository is ahead of what is deployed; the plugin uses what is deployed.
 

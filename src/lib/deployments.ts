@@ -142,14 +142,31 @@
  *      label quoted 8000021 base units — $8.000021 for a year — on
  *      2026-10-27. Nothing here is a faucet token, which is also why
  *      `ensv2 faucet` stays Sepolia-only: mainnet USDC has no open `mint`.
- *   2. An agent cannot be bound on mainnet. `Adapter8004` (0x7621630c…) has
- *      NO CODE on chain 1, so this table omits `adapter8004` and every command
- *      that mints, binds, inspects or repoints an agent refuses by name rather
- *      than guessing an address. When unruggable-labs ships it, that is a
- *      one-line table edit and no code change. The canonical ERC-8004
- *      IdentityRegistry is a separate question and IS pinned: it is live on
- *      mainnet at the same address and behind the same implementation as on
- *      Sepolia, so ENSIP-25 agent records still derive and read on chain 1.
+ *   2. Agent binding WORKS on mainnet, and neither the adapter nor the
+ *      ERC-8004 registry is at its Sepolia address. Through 0.9.0 this note
+ *      read "an agent cannot be bound on mainnet: Adapter8004 (0x7621630c…)
+ *      has NO CODE on chain 1". The address has no code on chain 1; it is
+ *      Sepolia's. Mainnet's adapter is 0xde152AfB…, the same proxy bytecode
+ *      (keccak 0xb9fcc9ff91e24503 on both chains) fronting its own chain's
+ *      implementation 0x3d74ff0c…, and it had been live since block 26285388
+ *      — 48 blocks BEFORE 26285436, the block this table was derived at. The
+ *      refusal came from testing one chain's address against the other, not
+ *      from anything the chain said.
+ *
+ *      Re-derived 2026-11-02: identityRegistry() answers, agents are minted
+ *      through it (ownerOf(1) = 0x9ce70828…), and an eth_call simulation of
+ *      register(ERC721, ETHRegistry 0xf60aba43…, nick.eth's token, uri) from
+ *      nick.eth's owner would mint agent 56108, while a stranger and a wrong
+ *      token id both revert 0xa9d48768 on the caller — so the adapter really
+ *      does check ownership against the mainnet ETHRegistry.
+ *
+ *      Each chain also has its OWN ERC-8004 IdentityRegistry, and the
+ *      adapter's identityRegistry() is the only thing that says which:
+ *      0x8004A169FB… on chain 1, 0x8004A818BF… on Sepolia. Both have code on
+ *      mainnet behind the same implementation 0x7274e874…, with separate agent
+ *      populations — which is how Sepolia's got pinned as mainnet's, and why
+ *      an ENSIP-25 key written on L1 pointed readers at a registry no mainnet
+ *      agent appears in.
  */
 
 export const MAINNET_CHAIN_ID = 1;
@@ -203,22 +220,29 @@ export type EnsV2Deployment = {
   readonly resolverProxyLogic: `0x${string}`;
   readonly subregistryImplementation: `0x${string}`;
   /**
-   * Adapter8004 proxy (unruggable-labs/adapter). Mints on the canonical
-   * ERC-8004 registry and binds the agent to a token.
+   * Adapter8004 proxy (unruggable-labs/adapter). Mints on this chain's
+   * canonical ERC-8004 registry and binds the agent to a token.
    *
-   * ABSENT where the adapter is not deployed — mainnet, as of 2026-10-27.
-   * Without it an agent cannot be minted, bound, inspected through the adapter
+   * PER CHAIN, not one address everywhere: 0xde152AfB… on mainnet,
+   * 0x7621630c… on Sepolia. Same proxy bytecode, a different implementation
+   * behind each. Testing one chain's address against the other reads as "not
+   * deployed", which is exactly the false negative 0.9.0 shipped for mainnet.
+   *
+   * Optional because a table can be pinned before its adapter exists. Where it
+   * is absent an agent cannot be minted, bound, inspected through the adapter
    * or repointed, and the commands that do those things refuse by name
    * (`hasAgentIdentity`) rather than guessing an address.
    */
   readonly adapter8004?: `0x${string}`;
   /**
-   * Canonical ERC-8004 IdentityRegistry, as reported by
-   * adapter8004.identityRegistry() where there is an adapter.
+   * This chain's canonical ERC-8004 IdentityRegistry — whatever
+   * adapter8004.identityRegistry() returns, and nothing else.
    *
-   * Independent of `adapter8004`: mainnet has this registry but no adapter, so
-   * ENSIP-25 keys still derive and still read there while binding refuses. A
-   * deployment with an adapter always has the registry too.
+   * That call is the only authority. Both chains' registries are deployed on
+   * mainnet behind the same implementation and each holds its own agents, so an
+   * address having code on chain 1 proves nothing about it being chain 1's.
+   * `agent.ts` bakes this address into the ENSIP-25 record key, so the wrong
+   * pin writes records that send readers to a registry the agent is not in.
    */
   readonly identityRegistry?: `0x${string}`;
   /**
@@ -295,8 +319,9 @@ export const SEPOLIA_ENSV2: EnsV2Deployment = {
  * unmigrated ones fall through to ENSV1Resolver (vitalik.eth, ens.eth read
  * RESERVED).
  *
- * Registration here spends REAL USDC or DAI, and there is no ERC-8004 adapter
- * on this chain — see "MAINNET" in the file header for both.
+ * Registration here spends REAL USDC or DAI, and the ERC-8004 adapter is at a
+ * DIFFERENT address than on Sepolia — see "MAINNET" in the file header for
+ * both.
  */
 export const MAINNET_ENSV2: EnsV2Deployment = {
   key: "mainnet",
@@ -324,14 +349,20 @@ export const MAINNET_ENSV2: EnsV2Deployment = {
   // page row "UserRegistryImpl"; ensjs agrees, ens-cli records 0x75FF9AdB…
   // instead. Read by nothing here — see PROVENANCE note 1.
   subregistryImplementation: "0xFAA23592ACA10A6d8875b18eA86954e8EB6d8d72",
-  // adapter8004 deliberately ABSENT: Adapter8004 has no code on chain 1
-  // (checked 2026-10-27), so nothing can be MINTED or BOUND here and every
-  // command that would try refuses by name. The canonical ERC-8004 registry
-  // below is a different matter — it is fully live on mainnet (same
-  // implementation 0x7274e874… as on Sepolia, agent #1 owned by
-  // 0xc67fAB15… with an ipfs:// tokenURI, read 2026-10-27), so ENSIP-25
-  // record keys still derive and still read correctly here.
-  identityRegistry: "0x8004A818BFB912233c491871b3d84c89A494BD9e",
+  // Adapter8004 on chain 1 — NOT the Sepolia address. 0.9.0 omitted this field
+  // because it checked Sepolia's 0x7621630c… against mainnet, where it has no
+  // code. This address has the same proxy bytecode as Sepolia's, EIP-1967
+  // implementation 0x3d74ff0c…, live since block 26285388. Verified
+  // 2026-11-02: register(ERC721, registry, nick.eth's token, uri) simulates
+  // clean from nick.eth's owner and would mint agent 56108.
+  adapter8004: "0xde152AfB7db5373F34876E1499fbD893A82dD336",
+  // The adapter above, asked for its own identityRegistry(). 0.9.0 pinned
+  // Sepolia's registry (0x8004A818BF…) here; that address DOES have code on
+  // mainnet, behind the same implementation 0x7274e874…, which is why the
+  // error survived review — but it holds a different agent population and the
+  // mainnet adapter does not use it. agent #1 here is owned by 0x9ce70828…,
+  // the same owner the adapter reports for its own agent #1 (read 2026-11-02).
+  identityRegistry: "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432",
   // Two independent derivations agree (2026-10-27): the root's `reverse`
   // resolver is ENSV1Resolver 0x394D8EB4… (page row), whose REGISTRY_V1() is
   // the canonical v1 registry 0x0000…2e1e, whose
@@ -506,12 +537,12 @@ export function contractSurface(d: EnsV2Deployment): "g1" | "g2" {
 
 /**
  * Whether this deployment can bind ERC-8004 agent identity at all — that is,
- * whether it has the Adapter8004 that mints and binds. False on mainnet, where
- * the adapter is not deployed (checked 2026-10-27) even though the canonical
- * ERC-8004 registry is. Callers that mint, bind, inspect or repoint an agent
- * narrow with this and refuse by name rather than reading from a guessed or
- * zero address; callers that only need ENSIP-25 keys want `identityRegistry`,
- * which mainnet has.
+ * whether it has the Adapter8004 that mints and binds. True on all four pinned
+ * tables as of 2026-11-02, mainnet included: its adapter is 0xde152AfB…, and
+ * 0.9.0 reported otherwise only because it tested Sepolia's address against
+ * chain 1. Kept because a table can be pinned before its adapter is deployed;
+ * callers that mint, bind, inspect or repoint an agent narrow with this and
+ * refuse by name rather than reading from a guessed or zero address.
  */
 export function hasAgentIdentity(d: EnsV2Deployment): d is EnsV2DeploymentWithIdentity {
   return typeof d.adapter8004 === "string" && typeof d.identityRegistry === "string";

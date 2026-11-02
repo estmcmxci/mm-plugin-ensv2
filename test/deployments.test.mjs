@@ -123,24 +123,36 @@ test("generation drives the gate; contractSurface collapses g2 and g3 for the en
   assert.equal(contractSurface(MAINNET_ENSV2), "g2");
 });
 
-test("agent identity: present wherever Adapter8004 is deployed, absent on mainnet", () => {
-  for (const d of [SEPOLIA_ENSV2, SEPOLIA_HACKATHON, SEPOLIA]) {
+test("agent identity: present on every pinned deployment, mainnet's adapter at its own address", () => {
+  for (const d of [SEPOLIA_ENSV2, MAINNET_ENSV2, SEPOLIA_HACKATHON, SEPOLIA]) {
     assert.ok(hasAgentIdentity(d), `${d.key} has the adapter`);
     assert.equal(requireAgentIdentity(d), d);
   }
-  assert.equal(hasAgentIdentity(MAINNET_ENSV2), false, "Adapter8004 has no code on chain 1");
-  assert.equal(MAINNET_ENSV2.adapter8004, undefined);
-  assert.throws(
-    () => requireAgentIdentity(MAINNET_ENSV2),
-    (e) => e.code === "ENSV2_NO_AGENT_IDENTITY" && /no Adapter8004/.test(e.message),
-  );
-  assert.deepEqual(deploymentsWithAgentIdentity().map((d) => d.key), ["sepolia", "hackathon", "beta"]);
+  assert.deepEqual(deploymentsWithAgentIdentity().map((d) => d.key), ["sepolia", "mainnet", "hackathon", "beta"]);
 
-  // The ERC-8004 registry is a weaker requirement, and mainnet DOES have it:
-  // ENSIP-25 keys derive there even though nothing can be bound.
-  for (const d of [SEPOLIA_ENSV2, MAINNET_ENSV2, SEPOLIA_HACKATHON, SEPOLIA]) {
+  // Mainnet's adapter is ITS OWN address. Pinning Sepolia's and testing it
+  // against chain 1 is what made 0.9.0 report "no adapter on L1" — the address
+  // has no code there because it is the other chain's.
+  assert.equal(MAINNET_ENSV2.adapter8004, "0xde152AfB7db5373F34876E1499fbD893A82dD336");
+  assert.notEqual(lower(MAINNET_ENSV2.adapter8004), lower(SEPOLIA_ENSV2.adapter8004));
+
+  // Each chain has its own ERC-8004 registry, chosen by the adapter's own
+  // identityRegistry(). agent.ts bakes this into the ENSIP-25 key, so the wrong
+  // pin writes records pointing at a registry the agent is not in.
+  assert.equal(requireIdentityRegistry(MAINNET_ENSV2), "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432");
+  for (const d of [SEPOLIA_ENSV2, SEPOLIA_HACKATHON, SEPOLIA]) {
     assert.equal(requireIdentityRegistry(d), "0x8004A818BFB912233c491871b3d84c89A494BD9e");
   }
+
+  // No pinned table takes the refusal any more, so it is exercised against a
+  // synthetic one: a table pinned before its adapter exists must still refuse
+  // by name rather than carry a zero address into a mint.
+  const adapterless = { ...MAINNET_ENSV2, key: "future", adapter8004: undefined, identityRegistry: undefined };
+  assert.equal(hasAgentIdentity(adapterless), false);
+  assert.throws(
+    () => requireAgentIdentity(adapterless),
+    (e) => e.code === "ENSV2_NO_AGENT_IDENTITY" && /no Adapter8004/.test(e.message),
+  );
 });
 
 test("the tables share nothing that must differ, and share exactly what must not", () => {
@@ -165,12 +177,20 @@ test("the tables share nothing that must differ, and share exactly what must not
     }
   }
 
-  // The canonical ERC-8004 registry is deployment-independent, and the adapter
-  // is the same contract everywhere it exists at all.
-  const adapters = new Set(all.map((d) => d.adapter8004).filter(Boolean));
-  assert.equal(adapters.size, 1, "one adapter, wherever it is deployed");
-  const registries = new Set(all.map((d) => d.identityRegistry).filter(Boolean));
-  assert.equal(registries.size, 1, "one canonical ERC-8004 registry");
+  // The adapter and the ERC-8004 registry are CHAIN-scoped, not deployment-
+  // scoped: every deployment on a chain agrees, and the two chains differ.
+  // Collapsing that distinction is precisely the 0.9.0 mainnet bug.
+  for (const field of ["adapter8004", "identityRegistry"]) {
+    const byChain = new Map();
+    for (const d of all) {
+      if (d[field] == null) continue;
+      const seen = byChain.get(d.chainId);
+      if (seen) assert.equal(lower(d[field]), lower(seen), `${field} must agree across deployments on chain ${d.chainId}`);
+      else byChain.set(d.chainId, d[field]);
+    }
+    assert.deepEqual([...byChain.keys()].sort((a, b) => a - b), [1, 11155111], `${field} is pinned on both chains`);
+    assert.notEqual(lower(byChain.get(1)), lower(byChain.get(11155111)), `${field} must differ between chains`);
+  }
 
   // Both mainnet and the canonical Sepolia table mirror the CANONICAL v1
   // reverse registrar for their chain; the hackathon mirrors its own.

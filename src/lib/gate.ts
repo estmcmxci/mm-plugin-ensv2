@@ -191,10 +191,11 @@ export function resolveTarget(
  * Narrow to a deployment that can actually mint and bind an ERC-8004 agent, or
  * refuse by name.
  *
- * Mainnet pins no Adapter8004 — unruggable-labs has not deployed it to chain 1
- * (checked 2026-10-27) — so `agent register`, `agent info` and `agent set-uri`
- * have nothing to call there. Refusing with the reason beats carrying a zero
- * address into a mint.
+ * Every pinned deployment has an adapter as of 2026-11-02, mainnet's being
+ * 0xde152AfB… rather than the Sepolia address this plugin used to test against
+ * chain 1, so nothing in the current table takes this refusal. It stays because
+ * a table can be pinned before its adapter is deployed, and refusing with the
+ * reason beats carrying a zero address into a mint.
  */
 export function requireAgentIdentity(d: EnsV2Deployment): EnsV2DeploymentWithIdentity {
   if (hasAgentIdentity(d)) return d;
