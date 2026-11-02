@@ -12,12 +12,16 @@ ENSv2 went live on **Ethereum mainnet** on 2026-10-27, and the plugin pins it: `
 ## Sixty seconds
 
 ```sh
-mm plugins install @estmcmxci/mm-plugin-ensv2 --accept-permissions
+mm config set experimentalPlugins true
+npm pack @estmcmxci/mm-plugin-ensv2    # the tarball, not the name: installing by name silently fails
+mm plugins install file:$PWD/estmcmxci-mm-plugin-ensv2-0.9.0.tgz --accept-permissions
 mm ensv2 status                        # is this chain really serving ENSv2? 8 checks, refuses otherwise
 mm ensv2 faucet                        # 100 test USDC, this deployment's payment token
 mm ensv2 provision myagent --agent-uri https://example.com/agent.json --endpoints web=https://example.com
 mm ensv2 primary set myagent.eth       # the wallet now resolves back to its name
 ```
+
+Install the **tarball**, not the package name: a by-name install is reported as installed and then silently removed, on both Agent Wallet 6.2.0 and 7.3.0. [Install](/install) has both working forms and the rest of the host quirks.
 
 `provision` runs the whole sequence as one resumable job: resolver, commit, approve, register, agent, records. Kill it anywhere and run it again. It never pays twice.
 
