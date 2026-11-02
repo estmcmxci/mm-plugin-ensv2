@@ -53,14 +53,15 @@ mm plugins install file:$PWD/estmcmxci-mm-plugin-ensv2-<version>.tgz --accept-pe
 Agent Wallet 6.2.0 does not refresh a plugin's consent record when a new version is installed over an approved one, so new commands stay unapproved. Uninstall, then install.
 ```sh
 mm plugins uninstall @estmcmxci/mm-plugin-ensv2
-mm plugins install @estmcmxci/mm-plugin-ensv2 --accept-permissions
+mm plugins install file:$PWD/estmcmxci-mm-plugin-ensv2-0.9.0.tgz --accept-permissions
 ```
 :::
 
 :::tip[npm stalls over IPv6]
-On some networks the host's bundled npm hangs on an IPv6 socket during install or uninstall. Prefix the command:
+On some networks the host's bundled npm hangs on an IPv6 socket during install or uninstall. Prefix whichever command is fetching:
 ```sh
-NODE_OPTIONS=--dns-result-order=ipv4first mm plugins install @estmcmxci/mm-plugin-ensv2 --accept-permissions
+NODE_OPTIONS=--dns-result-order=ipv4first npm pack @estmcmxci/mm-plugin-ensv2
+NODE_OPTIONS=--dns-result-order=ipv4first mm plugins install file:$PWD/estmcmxci-mm-plugin-ensv2-0.9.0.tgz --accept-permissions
 ```
 :::
 
