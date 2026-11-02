@@ -1,13 +1,39 @@
 ---
-title: "Live on Sepolia"
-description: "Two wallets, two names, two agents. Every transaction, block and gas figure, and how each claim was checked independently of the plugin."
+title: "Live on mainnet and Sepolia"
+description: "carbonari.eth on Ethereum L1 with a bound ERC-8004 agent, plus two Sepolia wallets. Every transaction, block and gas figure, and how each claim was checked independently of the plugin."
 ---
 
-# Live on Sepolia
+# Live on mainnet and Sepolia
 
-Everything below was executed from a MetaMask Agent Wallet with MFA on every write and then checked independently with `cast` against a public RPC: receipts, decoded calldata, contract reads, and Universal Resolver `resolve()` and `reverse()` calls. Recipe on the [design](/reference/design#verify-it-yourself) page.
+Everything below was executed from a MetaMask Agent Wallet with MFA on every write and then checked independently against a public RPC: receipts, decoded calldata, contract reads, and Universal Resolver `resolve()` and `reverse()` calls. Recipe on the [design](/reference/design#verify-it-yourself) page.
 
-## Wallet A — `grilledcheese.eth`, agent #10058
+## Ethereum mainnet — `carbonari.eth`, agent #56108
+
+The first ENSv2 name this plugin has registered on L1, and the first ERC-8004 agent it has bound there. Run 2026-11-02 with CLI **7.3.0** and plugin 0.10.0, from a server wallet reached by MetaMask Mobile QR sign-in. Owner `0xAaBE8DE830b7D9787bD47b1e1336d719771AC47E`, resolver `0x973D04f007b6e7419A1ce2C36f5125230B582aA5`, registered until 2027-11-02 for **8.000021 real USDC**.
+
+| Step | Tx | Block | Gas | Checked |
+|---|---|---|---|---|
+| resolver deploy | [`0xeca01953…98cbec23`](https://etherscan.io/tx/0xeca0195302611ca740823434fdbb1760dacfe5423bbae7012db616d298cbec23) | 26329774 | 177,974 | predicted == deployed; factory attested the implementation |
+| commit | [`0x3a452eef…1a338a86d`](https://etherscan.io/tx/0x3a452eef836b45707c87507abb9d50dbb412afb6ef1a21fde9865c91a338a86d) | 26329778 | 45,438 | commitment present |
+| approve | [`0xdc9e0671…82f80aa2`](https://etherscan.io/tx/0xdc9e067113191a77e3c80f55f614b021a99f4a3b3592cde2f226df2582f80aa2) | 26329781 | 55,558 | allowance = quote, real USDC `0xA0b86991…` |
+| register | [`0x4896aaa0…63fa367a`](https://etherscan.io/tx/0x4896aaa0b5dd522830e1aecc3f011b4f41acb745b5dcc281e5d98a7363fa367a) | 26329787 | 229,171 | `REGISTERED`, epoch 0, resolver bound at registration |
+| records set (5) | [`0x46a6074e…021bf9f8b`](https://etherscan.io/tx/0x46a6074e8d5d4dd2bb7ff390ff6cb95022b020a901addc4a13d8c33021bf9f8b) | 26329802 | 488,444 | `addr`, `description`, `url`, `agent-endpoint[web]`, `agent-context`, all read back via UR |
+| primary set | [`0xddc9863d…d620e505`](https://etherscan.io/tx/0xddc9863d64504ca501526d8a69649c5cf24bd8552740bc7ae614f224d620e505) | 26329805 | 114,042 | `UR.reverse` → `carbonari.eth`; registrar re-derived root → `reverse` → v1 registry |
+| agent register | [`0x042d5597…da6e11de`](https://etherscan.io/tx/0x042d5597bcead185f5150d07d292e4961b06574b7ec6954f15283385da6e11de) | 26329811 | 203,684 | agent **#56108**, controller = owner, NFT held by adapter |
+| records link (ENSIP-25) | [`0x7f1c23d1…1231eadba`](https://etherscan.io/tx/0x7f1c23d19a979d54fa298a0e138f9273d91fec7787ed2f396d4bde91231eadba) | 26329816 | 73,848 | `ensip25Linked: true`, key re-derived by event scan |
+| records avatar | [`0xa01b061f…d053aa57`](https://etherscan.io/tx/0xa01b061f67d80e4f69d0358b9538df556b6b97bcc24614fd649dc6bfd053aa57) | 26329858 | 140,206 | `ipfs://bafkreictcg…xc4rpe`, fetched back from a public gateway |
+
+Nine transactions, 1,528,365 gas, every receipt `success`.
+
+### What this run specifically proves
+
+**The mainnet adapter is real, and it is not at Sepolia's address.** Through 0.9.0 this plugin pinned no `adapter8004` for chain 1 and refused every `agent *` command there, because it tested Sepolia's `0x7621630c…` against mainnet and read back no code. Agent #56108 was minted through `0xde152AfB7db5373F34876E1499fbD893A82dD336`, the adapter that was live the whole time — since block 26285388, which is 48 blocks *before* the block the mainnet table was originally derived at.
+
+**Each chain has its own ERC-8004 registry.** The ENSIP-25 key written here is `agent-registration[0x000100000101148004a169fb4a3325136eb29fa0ceb6d2e539a432][56108]` — ERC-7930 for chain `0x01` plus registry `0x8004A169FB4a3325136EB29fA0ceB6D2e539a432`, read from the adapter's own `identityRegistry()`. 0.9.0 would have written Sepolia's `0x8004A818BF…` here, pointing every reader at a registry this agent does not appear in. The record is resolved and rendered independently by the ENS manager app, which displays registry `8004.eth` and agent id `56108` on the name.
+
+**A paid step is not re-sent when it is already done.** The Sepolia rehearsal of this same ladder ran out of gas between the USDC approval and the register call. Rerunning the identical command resumed from the private checkpoint with `resumedCommitment: true` and `approve: null` — it reused the commitment, skipped the approval it had already paid for, and sent only the register transaction.
+
+## Sepolia, wallet A — `grilledcheese.eth`, agent #10058
 
 Owner `0x0943142F488fb694141841bF46e17Be2bB5C7EE1`, resolver `0xeda43c6884FD83bbb7774F2e27B6e2d6fb97D282`. Built rung by rung, 2026-09-03.
 
@@ -22,7 +48,7 @@ Owner `0x0943142F488fb694141841bF46e17Be2bB5C7EE1`, resolver `0xeda43c6884FD83bb
 | records set | [`0x4a0d95c7…97da660`](https://sepolia.etherscan.io/tx/0x4a0d95c7fc914b14c66a82b1b4da15953488ad8cd02c6b58f4118799397da660) | 400,890 | block 11630151; `multicall` with exactly 6 inner calls; all read back via UR |
 | primary set | [`0x780faf45…2d31f4c4`](https://sepolia.etherscan.io/tx/0x780faf4566c9bd65d26e0696c1c46c7dd12b2ae86f388c4f4c942e6a2d31f4c4) | 113,961 | block 11630546; `UR.reverse` → `grilledcheese.eth` |
 
-## Wallet B — `sesquipedalian.eth`, agent #10059
+## Sepolia, wallet B — `sesquipedalian.eth`, agent #10059
 
 A wallet created for the purpose, funded with 0.004 ETH, run 2026-09-04 as the publish gate for the shipped plugin. Owner `0x9bFF63174618a7660C566ef4B5D6bf484fa5034b`, resolver `0x94a26d24EEa517f2722F9786967729BEEb7227af`.
 

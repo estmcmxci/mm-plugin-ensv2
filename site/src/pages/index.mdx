@@ -16,7 +16,7 @@ On the default **`sepolia`** deployment — the faucet below is testnet-only.
 ```sh
 mm config set experimentalPlugins true
 npm pack @estmcmxci/mm-plugin-ensv2    # the tarball, not the name: installing by name silently fails
-mm plugins install file:$PWD/estmcmxci-mm-plugin-ensv2-0.10.0.tgz --accept-permissions
+mm plugins install file:$PWD/estmcmxci-mm-plugin-ensv2-0.11.0.tgz --accept-permissions
 mm ensv2 status                        # is this chain really serving ENSv2? 8 checks, refuses otherwise
 mm ensv2 faucet                        # Sepolia MockUSDC, open mint — no mainnet equivalent
 mm ensv2 provision myagent --agent-uri https://example.com/agent.json --endpoints web=https://example.com
