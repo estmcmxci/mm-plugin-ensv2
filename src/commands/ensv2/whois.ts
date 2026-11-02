@@ -76,6 +76,13 @@ export default class EnsV2Whois extends PluginCommand<WhoisInfo> {
     if (data.owner) parts.push(`owner ${data.owner}`);
     if (data.expiresAt) parts.push(`${data.status === "REGISTERED" ? "expires" : "expired"} ${data.expiresAt.slice(0, 10)}`);
     if (data.status === "REGISTERED") parts.push(data.resolver ? `resolver ${data.resolver}` : "no resolver");
+    // AVAILABLE is the registry's word, not the registrar's: a lapsed name in
+    // its grace period reads AVAILABLE and still cannot be bought. Say so here
+    // rather than letting the reader find out from a reverted price call.
+    if (data.status === "AVAILABLE" && data.registrable === false) {
+      parts.push("but NOT registrable — in grace or reserved; the registrar refuses it");
+    }
+    if (data.status === "AVAILABLE" && data.registrable === true) parts.push("registrable now");
     return parts.join(", ");
   }
 }
