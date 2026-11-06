@@ -7,7 +7,7 @@ import {
   schemaToArgs,
   schemaToFlags,
 } from "@metamask/agent-wallet/plugin";
-import { resolveTarget, requireEnsV2, toCommandError } from "../../../lib/gate.js";
+import { resolveWriteTarget, requireEnsV2, toCommandError } from "../../../lib/gate.js";
 import { buildDeployPlan, ownedResolverStatus } from "../../../lib/resolver.js";
 import { selectedEvmAddress } from "../../../lib/wallet.js";
 
@@ -15,14 +15,14 @@ const inputs = {
   chain: {
     type: InputFieldType.Text,
     flag: "chain",
-    message: "EVM chain id (default 11155111, Sepolia; 1 for Ethereum mainnet — or just name the deployment, which implies its chain)",
+    message: "EVM chain id (1 for Ethereum mainnet, 11155111 for Sepolia; naming the deployment is enough, it implies its chain)",
     required: false,
     prompt: false,
   },
   deployment: {
     type: InputFieldType.Text,
     flag: "deployment",
-    message: "ENSv2 deployment: sepolia (default, ENS Labs' canonical testnet), mainnet (Ethereum L1 — spends real USDC), hackathon (the ETHOnline 2026 deployment), beta (dead, kept only so old jobs resolve)",
+    message: "ENSv2 deployment, REQUIRED for this command: mainnet (Ethereum L1 — spends real USDC), sepolia (ENS Labs' canonical testnet), hackathon (the ETHOnline 2026 deployment), beta (dead, kept only so old jobs resolve)",
     required: false,
     prompt: false,
   },
@@ -60,9 +60,9 @@ export default class EnsV2ResolverDeploy extends PluginCommand<DeployResult> {
     "Deploy this wallet's ENSv2 resolver (once per wallet; no-op if it exists). Signs through MetaMask policy.";
 
   static override examples = [
-    "<%= config.bin %> ensv2 resolver plan     # preview first",
-    "<%= config.bin %> ensv2 resolver deploy",
-    "<%= config.bin %> ensv2 resolver deploy --json",
+    "<%= config.bin %> ensv2 resolver plan     # preview first --deployment sepolia",
+    "<%= config.bin %> ensv2 resolver deploy --deployment sepolia",
+    "<%= config.bin %> ensv2 resolver deploy --json --deployment sepolia",
   ];
 
   static override requiresAuth = true;
@@ -74,7 +74,7 @@ export default class EnsV2ResolverDeploy extends PluginCommand<DeployResult> {
 
   async execute(io: CommandIO): Promise<DeployResult> {
     const { chain, deployment: deploymentFlag } = await io.resolveInputs(inputs);
-    const { chainId, deploymentKey } = resolveTarget(chain, deploymentFlag);
+    const { chainId, deploymentKey } = resolveWriteTarget(chain, deploymentFlag);
     const client = this.ctx.publicClient(chainId);
 
     try {

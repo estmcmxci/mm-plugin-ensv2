@@ -10,7 +10,7 @@ import {
 import { formatUnits, parseUnits } from "viem";
 import { erc20Abi } from "../../lib/abis.js";
 import { SEPOLIA_CHAIN_ID } from "../../lib/deployments.js";
-import { resolveTarget, requireEnsV2, toCommandError } from "../../lib/gate.js";
+import { resolveWriteTarget, requireEnsV2, toCommandError } from "../../lib/gate.js";
 import { buildMint, tokenState } from "../../lib/registrar.js";
 import { selectedEvmAddress } from "../../lib/wallet.js";
 
@@ -25,14 +25,14 @@ const inputs = {
   chain: {
     type: InputFieldType.Text,
     flag: "chain",
-    message: "EVM chain id (default 11155111, Sepolia; 1 for Ethereum mainnet — or just name the deployment, which implies its chain)",
+    message: "EVM chain id (1 for Ethereum mainnet, 11155111 for Sepolia; naming the deployment is enough, it implies its chain)",
     required: false,
     prompt: false,
   },
   deployment: {
     type: InputFieldType.Text,
     flag: "deployment",
-    message: "ENSv2 deployment: sepolia (default, ENS Labs' canonical testnet), mainnet (Ethereum L1 — spends real USDC), hackathon (the ETHOnline 2026 deployment), beta (dead, kept only so old jobs resolve)",
+    message: "ENSv2 deployment, REQUIRED for this command: mainnet (Ethereum L1 — spends real USDC), sepolia (ENS Labs' canonical testnet), hackathon (the ETHOnline 2026 deployment), beta (dead, kept only so old jobs resolve)",
     required: false,
     prompt: false,
   },
@@ -56,7 +56,7 @@ type FaucetResult = {
 export default class EnsV2Faucet extends PluginCommand<FaucetResult> {
   static override description = "Mint Sepolia test USDC (the ENSv2 beta payment token) to this wallet. Sepolia only.";
 
-  static override examples = ["<%= config.bin %> ensv2 faucet", "<%= config.bin %> ensv2 faucet --amount 20"];
+  static override examples = ["<%= config.bin %> ensv2 faucet --deployment sepolia", "<%= config.bin %> ensv2 faucet --amount 20 --deployment sepolia"];
 
   static override requiresAuth = true;
   static override requiresInit = true;
@@ -67,7 +67,7 @@ export default class EnsV2Faucet extends PluginCommand<FaucetResult> {
 
   async execute(io: CommandIO): Promise<FaucetResult> {
     const { amount, chain, deployment: deploymentFlag } = await io.resolveInputs(inputs);
-    const { chainId, deploymentKey } = resolveTarget(chain, deploymentFlag);
+    const { chainId, deploymentKey } = resolveWriteTarget(chain, deploymentFlag);
     if (chainId !== SEPOLIA_CHAIN_ID) {
       throw new CommandError("ENSV2_FAUCET_SEPOLIA_ONLY", "The faucet mints a mock token that only exists on Sepolia.", "Omit --chain.");
     }
