@@ -62,7 +62,7 @@ import {
 import { ethLabel } from "./names.js";
 import { ReadError, type WhoisInfo } from "./reads.js";
 import { buildRecordsMulticall, diffRecords, type DesiredRecords } from "./records.js";
-import { ZERO_ADDRESS, ZERO_REFERRER, buildApprove, buildCommit, buildRegister, makeSecret, type Calldata, type CommitmentParams } from "./registrar.js";
+import { ZERO_ADDRESS, ZERO_REFERRER, buildApprove, buildCommit, buildRegister, fundingHint, makeSecret, type Calldata, type CommitmentParams, type Quote } from "./registrar.js";
 import { buildDeployPlan } from "./resolver.js";
 import { encodeFunctionData } from "viem";
 
@@ -302,9 +302,12 @@ async function planProvisionInner(deps: Pick<EngineDeps, "chain" | "deployment" 
   }
   let quoteTotal = 0n;
   let alreadyRegistered = false;
+  /** Only a quote knows the payment token's symbol and decimals; the funding refusal below needs them to be legible. */
+  let paymentToken: Quote["paymentToken"] | null = null;
   if (avail.available) {
     const q = await deps.chain.quote(label, req.durationSeconds);
     quoteTotal = BigInt(q.total);
+    paymentToken = q.paymentToken;
   } else {
     const w = await deps.chain.whois(normalized);
     if (w.status === "REGISTERED" && w.owner && isAddressEqual(w.owner, owner)) {
@@ -369,7 +372,8 @@ async function planProvisionInner(deps: Pick<EngineDeps, "chain" | "deployment" 
   if (opts.checkFunding !== false && !alreadyRegistered && quoteTotal > 0n) {
     const { balance } = await deps.chain.tokenState(owner);
     if (balance < quoteTotal) {
-      halt({ code: "E_INSUFFICIENT_FUNDS", category: "funding", retryability: "requires_user_action", message: `Registering ${normalized} costs ${quoteTotal} token units; this wallet holds ${balance}.`, recoveryAction: { kind: "fund_wallet_and_resume", description: "On Sepolia, run `mm ensv2 faucet` to mint test USDC, then run the same command again." } }, "terminal_failed");
+      // quoteTotal > 0n only when the name quoted, so the token is known here.
+      halt({ code: "E_INSUFFICIENT_FUNDS", category: "funding", retryability: "requires_user_action", message: `Registering ${normalized} costs ${quoteTotal} token units; this wallet holds ${balance}.`, recoveryAction: { kind: "fund_wallet_and_resume", description: fundingHint(d, quoteTotal - balance, paymentToken!) } }, "terminal_failed");
     }
   }
 
@@ -1118,7 +1122,7 @@ export async function runJob(deps: EngineDeps, file: JobFile, opts: RunOptions =
           const total = BigInt(q.total);
           const ceiling = BigInt(intent.maxSpend.maxTotalAmount);
           if (total > ceiling) halt({ code: "E_PRICE_EXCEEDS_MAX_SPEND", category: "funding", retryability: "requires_user_action", message: `The registrar now quotes ${q.formatted.total} ${q.paymentToken.symbol} (${total} units); the intent's ceiling is ${ceiling} units.`, recoveryAction: { kind: "refresh_quote_and_resume", description: `Re-run with --max-spend ${q.formatted.total} (or more) to raise this job's ceiling; it will not pay above the ceiling it has.` } }, "retryable_failed", "price_recheck");
-          if (funds.balance < total) halt({ code: "E_INSUFFICIENT_FUNDS", category: "funding", retryability: "requires_user_action", message: `Registration costs ${q.formatted.total} ${q.paymentToken.symbol}; this wallet holds ${funds.balance} units.`, recoveryAction: { kind: "fund_wallet_and_resume", description: "On Sepolia, run `mm ensv2 faucet`, then run the job again." } }, "retryable_failed", "price_recheck");
+          if (funds.balance < total) halt({ code: "E_INSUFFICIENT_FUNDS", category: "funding", retryability: "requires_user_action", message: `Registration costs ${q.formatted.total} ${q.paymentToken.symbol}; this wallet holds ${funds.balance} units.`, recoveryAction: { kind: "fund_wallet_and_resume", description: fundingHint(d, total - funds.balance, q.paymentToken) } }, "retryable_failed", "price_recheck");
           if (funds.allowance < total) halt({ code: "E_INSUFFICIENT_ALLOWANCE", category: "funding", retryability: "retryable", message: `The registrar's allowance is ${funds.allowance} units; ${total} are needed.`, recoveryAction: { kind: "grant_allowance_and_resume", description: "Run the job again; payment_token_approve will be re-observed.", resumeFrom: "payment_token_approve" } }, "retryable_failed", "payment_token_approve");
           await rt.markStep(name, "succeeded", `${q.formatted.total} ${q.paymentToken.symbol} ≤ ceiling ${ceiling}`);
         });

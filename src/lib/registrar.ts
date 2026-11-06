@@ -27,11 +27,53 @@ import {
   type PublicClient,
 } from "viem";
 import { erc20Abi, ethRegistrarAbi, rentPriceOracleAbi } from "./abis.js";
-import type { EnsV2Deployment } from "./deployments.js";
+import { MAINNET_CHAIN_ID, SEPOLIA_CHAIN_ID, type EnsV2Deployment } from "./deployments.js";
 import { ethLabel } from "./names.js";
 import { ReadError } from "./reads.js";
 
 export const SECONDS_PER_YEAR = 365n * 86400n;
+
+/** Round up, for a headroom figure that must not land under the target. */
+const divCeil = (n: bigint, d: bigint): bigint => (n + d - 1n) / d;
+
+/**
+ * What a caller who cannot cover the quote should actually do, ON THIS CHAIN.
+ *
+ * Every insufficient-funds refusal used to say "On Sepolia, run `mm ensv2
+ * faucet`". That is advice no one on mainnet can follow: the faucet mints
+ * MockUSDC through an open `mint` that only the test deployments' token has
+ * (deployments.ts), so on chain 1 the one suggestion the plugin offered was
+ * impossible, and it offered nothing else. An agent wallet reaching this
+ * refusal is holding ETH — a provisioning run is ~1.2M gas — and is short
+ * only the USDC, so the fix is to name the host's own swap.
+ *
+ * `mm swap` is exact-IN: `--amount` is the ETH going in, and the USDC that
+ * comes out is the quote's estimate, not something the caller can pin. So the
+ * hint asks for the quote to be re-sized rather than naming an ETH figure
+ * this function cannot know, and asks for 3% more USDC than the shortfall so
+ * a move between quote and register does not land the wallet short again.
+ *
+ * Verified against the host (agent-wallet 7.3.0): `mm swap quote --from ETH
+ * --to USDC --from-chain-id 11155111` is refused outright, UNSUPPORTED_CHAIN
+ * "Swaps are not supported on Ethereum Sepolia (testnet)" — which is why
+ * Sepolia keeps the faucet and only chain 1 is pointed at the swap.
+ */
+export function fundingHint(d: EnsV2Deployment, shortfall: bigint, token: { symbol: string; decimals: number }): string {
+  const need = formatUnits(shortfall, token.decimals);
+  const withHeadroom = formatUnits(divCeil(shortfall * 103n, 100n), token.decimals);
+  if (d.chainId === SEPOLIA_CHAIN_ID) {
+    return `Run \`mm ensv2 faucet\` to mint ${need} or more test ${token.symbol}, then run the same command again.`;
+  }
+  if (d.chainId === MAINNET_CHAIN_ID) {
+    return (
+      `This is real ${token.symbol}. Buy the ${need} ${token.symbol} this wallet is short with the ETH it already holds: ` +
+      `\`mm swap quote --from ETH --to ${token.symbol} --amount <eth> --from-chain-id ${d.chainId}\` prices an exact-IN swap, so raise ` +
+      `<eth> until the quoted ${token.symbol} covers ${withHeadroom}, then \`mm swap execute --quote-id <id>\` and run the same ` +
+      `command again. \`mm ensv2 faucet\` cannot help here: it mints a mock token that exists only on Sepolia.`
+    );
+  }
+  return `Fund this wallet with at least ${need} ${token.symbol} (token ${d.paymentToken} on chain ${d.chainId}), then run the same command again.`;
+}
 
 /**
  * Surface a decoded custom error by name; leave anything else to the caller.

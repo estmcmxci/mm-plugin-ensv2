@@ -22,6 +22,7 @@ import {
   checkAvailable,
   commitmentTime,
   computeCommitment,
+  fundingHint,
   makeSecret,
   quoteRegistration,
   tokenState,
@@ -153,7 +154,7 @@ export default class EnsV2Register extends PluginCommand<RegisterResult> {
         throw new CommandError(
           "ENSV2_INSUFFICIENT_FUNDS",
           `Registering ${name} costs ${quote.formatted.total} ${quote.paymentToken.symbol}; this wallet holds ${Number(balance) / 10 ** quote.paymentToken.decimals}.`,
-          "On Sepolia, run `mm ensv2 faucet` to mint test USDC.",
+          fundingHint(d, total - balance, quote.paymentToken),
         );
       }
 
