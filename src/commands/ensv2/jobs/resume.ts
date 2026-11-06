@@ -2,7 +2,7 @@ import { CommandError, type CommandIO, InputFieldType, type InputSchema, PluginC
 import { isAddressEqual, parseUnits } from "viem";
 import { erc20Abi } from "../../../lib/abis.js";
 import { deploymentByDeploymentId } from "../../../lib/deployments.js";
-import { resolveWriteTarget, requireDeployment, requireEnsV2 } from "../../../lib/gate.js";
+import { parsePayWith, requireDeployment, requireEnsV2, resolveWriteTarget } from "../../../lib/gate.js";
 import { defaultStore, engineDeps, jobErrorToCommandError, summarize } from "../../../lib/hostjobs.js";
 import { runJob } from "../../../lib/provision.js";
 import { selectedEvmAddress } from "../../../lib/wallet.js";
@@ -13,6 +13,14 @@ const b = (flag: string, message: string) => ({ type: InputFieldType.Boolean, fl
 const inputs = {
   jobId: { type: InputFieldType.Text, flag: "job-id", message: "Job id (see `ensv2 jobs list`)", required: true, index: 0 },
   resubmitUnconfirmed: b("resubmit-unconfirmed", "You have confirmed a step recorded as submitted never landed and is not pending; allow it to be sent again"),
+  payWith: {
+    type: InputFieldType.Text,
+    flag: "pay-with",
+    message:
+      "Where the payment token comes from when the wallet is short: token (default — stop and say how to fund the wallet) or eth (buy the shortfall on Uniswap v3 first, held to the Chainlink ETH/USD price). Never implied: a swap spends the wallet's ETH, so a resume has to ask for it again",
+    required: false,
+    prompt: false,
+  },
   maxSpend: { type: InputFieldType.Text, flag: "max-spend", message: "Raise the job's spend ceiling to this amount in payment-token units (e.g. 8.5); lowering is ignored", required: false, prompt: false },
   verifyRpc: { type: InputFieldType.Text, flag: "verify-rpc", message: "Second, independent RPC URL for the final verification", required: false, prompt: false },
   chain: { type: InputFieldType.Text, flag: "chain", message: "EVM chain id (1 for Ethereum mainnet, 11155111 for Sepolia; naming the deployment is enough, it implies its chain)", required: false, prompt: false },
@@ -82,7 +90,7 @@ export default class EnsV2JobsResume extends PluginCommand<ProvisionResult> {
         }
       }
       const deps = await engineDeps({ ctx: this.ctx, io, commandId: "ensv2:jobs:resume", client, deployment: d, store, verifyRpc: v.verifyRpc });
-      const done = await runJob(deps, file, { resubmitUnconfirmed: v.resubmitUnconfirmed, ...(raiseCeilingTo !== undefined ? { raiseCeilingTo } : {}) });
+      const done = await runJob(deps, file, { resubmitUnconfirmed: v.resubmitUnconfirmed, payWith: parsePayWith(v.payWith), ...(raiseCeilingTo !== undefined ? { raiseCeilingTo } : {}) });
       return toResult(done.job, true, summarize(done, store));
     } catch (error) {
       throw jobErrorToCommandError(error, store);

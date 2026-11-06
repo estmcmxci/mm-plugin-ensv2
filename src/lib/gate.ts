@@ -260,6 +260,25 @@ export function requireIdentityRegistry(d: EnsV2Deployment): `0x${string}` {
   );
 }
 
+/**
+ * `--pay-with`: where the payment token comes from when the wallet is short.
+ *
+ * An unrecognised value is a refusal, never a silent fallback to either side —
+ * the same rule as `--deployment`, for a sharper reason: a typo'd
+ * `--pay-with eht` must not quietly decide to spend the wallet's ETH, nor
+ * quietly decide not to and halt as if nothing had been asked for.
+ */
+export function parsePayWith(raw: string | undefined): "token" | "eth" {
+  const v = raw?.trim().toLowerCase();
+  if (!v) return "token";
+  if (v === "token" || v === "eth") return v;
+  throw new CommandError(
+    "ENSV2_INVALID_PAY_WITH",
+    `'${raw}' is not a payment source.`,
+    "Pass `--pay-with token` (the default: stop and say how to fund the wallet) or `--pay-with eth` (buy the shortfall on Uniswap v3 first).",
+  );
+}
+
 export function toCommandError(error: unknown): CommandError {
   if (error instanceof CommandError) return error;
   if (error instanceof ReadError) return new CommandError(error.code, error.message, error.hint ?? "See --verbose for detail.");

@@ -6,7 +6,9 @@
 // resume is answered by state the calldata actually produced.
 import { decodeEventLog, decodeFunctionData, encodeAbiParameters, encodeEventTopics, getAddress, isAddressEqual, keccak256, toHex, zeroAddress } from "viem";
 import { labelhash, namehash } from "viem/ens";
+import { parseAbi } from "viem";
 import { adapter8004Abi, erc20Abi, ethRegistrarAbi, permissionedResolverAbi, resolverAbi, verifiableFactoryAbi } from "../dist/lib/abis.js";
+import { ethSwapRouter, feedScale, withBps, SWAP_SLIPPAGE_BPS } from "../dist/lib/swap.js";
 import { AGENT_BOUND } from "../dist/lib/agent.js";
 import { SEPOLIA } from "../dist/lib/deployments.js";
 import { ensip25Key } from "../dist/lib/erc7930.js";
@@ -26,6 +28,16 @@ export class MockChain {
     this.names = new Map(); // label -> { owner, expiry, version, epoch, resolver }
     this.balances = new Map();
     this.allowances = new Map();
+    /** Native ETH, wei. The ETH-funded path pays the swap AND its gas from it. */
+    this.ethBalances = new Map();
+    /** Chainlink ETH/USD, 8 decimals. Near the real mainnet price. */
+    this.ethUsd = 226_600_000_000n;
+    /** Set to a ReadError-shaped throw to make the quote refuse. */
+    this.swapQuoteError = null;
+    /** Wei of gas the mock's estimator reports for any call. */
+    this.gasCostWei = 1_000_000_000_000_000n;
+    /** Every swap the router filled: { amountOut, amountIn, from }. */
+    this.swaps = [];
     this.agents = []; // { agentId, standard, tokenContract, tokenId, registeredBy, uri }
     this.nextAgentId = 10059n;
     this.records = new Map(); // node -> { addr, texts }
@@ -66,6 +78,9 @@ export class MockChain {
   fund(owner, amount) {
     this.balances.set(owner.toLowerCase(), amount);
   }
+  fundEth(owner, wei) {
+    this.ethBalances.set(owner.toLowerCase(), wei);
+  }
   /** Simulate a role grant: the token id regenerates, the epoch does not. */
   grantRole(label) {
     const n = this.names.get(label);
@@ -100,6 +115,23 @@ export class MockChain {
   }
   async tokenState(owner) {
     return { balance: this.balances.get(owner.toLowerCase()) ?? 0n, allowance: this.allowances.get(owner.toLowerCase()) ?? 0n };
+  }
+  async ethBalance(owner) {
+    return this.ethBalances.get(owner.toLowerCase()) ?? 0n;
+  }
+  /**
+   * A quote at exactly the oracle price, plus the real slippage allowance —
+   * the shape `selectEthSwapQuote` would return for a pool trading at par.
+   * The guards themselves are pure and tested against their own vectors in
+   * test/swap.test.mjs; this only has to be a quote the engine can act on.
+   */
+  async ethSwapQuote(amountOut, decimals) {
+    if (this.swapQuoteError) throw this.swapQuoteError;
+    const amountIn = (amountOut * feedScale(decimals) + this.ethUsd - 1n) / this.ethUsd;
+    return { amountOut, amountIn, maximumEth: withBps(amountIn, SWAP_SLIPPAGE_BPS), fee: 500, ethUsd: this.ethUsd };
+  }
+  async txGasCost() {
+    return this.gasCostWei;
   }
   async computeCommitment(p) {
     return this.makeCommitment(p);
@@ -265,6 +297,33 @@ export class MockChain {
         return "register";
       }
       throw new Error(`unexpected ${functionName}`);
+    }
+    if (to === ethSwapRouter(d.chainId).toLowerCase()) {
+      const routerAbi = parseAbi([
+        "function exactOutputSingle((address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 amountOut, uint256 amountInMaximum, uint160 sqrtPriceLimitX96) params) payable returns (uint256 amountIn)",
+        "function refundETH() payable",
+        "function multicall(uint256 deadline, bytes[] data) payable returns (bytes[] results)",
+      ]);
+      const outer = decodeFunctionData({ abi: routerAbi, data: calldata.data });
+      if (outer.functionName !== "multicall") throw new Error(`unexpected ${outer.functionName}`);
+      const [deadline, calls] = outer.args;
+      // SwapRouter02's multicall reverts the whole batch past its deadline.
+      if (this.time > Number(deadline)) throw new Error("Transaction too old");
+      const inner = calls.map((c) => decodeFunctionData({ abi: routerAbi, data: c }));
+      if (inner[0]?.functionName !== "exactOutputSingle") throw new Error("expected exactOutputSingle first");
+      if (inner[1]?.functionName !== "refundETH") throw new Error("expected refundETH second: unspent ETH must come back");
+      const p = inner[0].args[0];
+      if (!isAddressEqual(p.tokenOut, d.paymentToken)) throw new Error("wrong tokenOut");
+      const amountIn = (p.amountOut * feedScale(6) + this.ethUsd - 1n) / this.ethUsd;
+      if (amountIn > p.amountInMaximum) throw new Error("TooMuchRequested");
+      const eth = this.ethBalances.get(from.toLowerCase()) ?? 0n;
+      if (eth < calldata.value) throw new Error("insufficient ETH");
+      // Takes what the pool needed, refunds the rest in the same transaction.
+      this.ethBalances.set(from.toLowerCase(), eth - amountIn);
+      const bal = this.balances.get(p.recipient.toLowerCase()) ?? 0n;
+      this.balances.set(p.recipient.toLowerCase(), bal + p.amountOut);
+      this.swaps.push({ amountOut: p.amountOut, amountIn, from });
+      return "multicall(exactOutputSingle,refundETH)";
     }
     if (to === d.paymentToken.toLowerCase()) {
       const { functionName, args } = decodeFunctionData({ abi: erc20Abi, data: calldata.data });
