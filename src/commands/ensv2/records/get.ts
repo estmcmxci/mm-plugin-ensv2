@@ -12,8 +12,8 @@ import { readRecordSet, type RecordSet } from "../../../lib/records.js";
 const inputs = {
   name: { type: InputFieldType.Text, flag: "name", message: "ENSv2 name (e.g. myagent.eth)", required: true, index: 0 },
   agentIds: { type: InputFieldType.Text, flag: "agent-ids", message: "comma-separated ERC-8004 agent ids to check ENSIP-25 links for", required: false, prompt: false },
-  chain: { type: InputFieldType.Text, flag: "chain", message: "EVM chain id (default 11155111, Sepolia; 1 for Ethereum mainnet — or just name the deployment, which implies its chain)", required: false, prompt: false },
-  deployment: { type: InputFieldType.Text, flag: "deployment", message: "ENSv2 deployment: sepolia (default, ENS Labs' canonical testnet), mainnet (Ethereum L1 — spends real USDC), hackathon (the ETHOnline 2026 deployment), beta (dead, kept only so old jobs resolve)", required: false, prompt: false },
+  chain: { type: InputFieldType.Text, flag: "chain", message: "EVM chain id (default 1, Ethereum mainnet; 11155111 for Sepolia — or just name the deployment, which implies its chain)", required: false, prompt: false },
+  deployment: { type: InputFieldType.Text, flag: "deployment", message: "ENSv2 deployment: mainnet (default, ENSv2 on Ethereum L1), sepolia (ENS Labs' canonical testnet), hackathon (the ETHOnline 2026 deployment), beta (dead, kept only so old jobs resolve)", required: false, prompt: false },
 } satisfies InputSchema;
 
 /**

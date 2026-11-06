@@ -4,15 +4,15 @@
 
 ENSv2 names and ERC-8004 agent identity, natively inside the [MetaMask Agent Wallet](https://docs.metamask.io/agent-wallet/) CLI (`mm`). An agent wallet can register an ENSv2 name it owns, deploy its own resolver, mint an ERC-8004 agent bound to that name, publish the ENSIP-25/26 records that make it discoverable, and set the name as its primary name — every signature routed through MetaMask policy and MFA, every write verified on chain before the command returns.
 
-**Mainnet and Sepolia, fail-closed on both.** ENSv2 went live on Ethereum mainnet on 2026-10-27, and this plugin pins it: `--deployment mainnet` (chain 1) works for everything, ERC-8004 agent binding included. The default stays `sepolia` — ENS Labs' canonical testnet table — because spending real USDC should be something you ask for, not something you get by omission. Two older Sepolia tables remain pinned (`hackathon`, and the dead `beta`) so existing jobs still resolve; see [Which deployment](#which-deployment). The plugin never falls back to ENSv1 behaviour, on any chain. Docs, explainer and live evidence: **https://mm-ensv2.estmcmxci.co** (every page is also Markdown: append `.md`, or fetch `/llms.txt`).
+**Mainnet and Sepolia, fail-closed on both.** ENSv2 went live on Ethereum mainnet on 2026-10-27, and this plugin pins it: `--deployment mainnet` (chain 1) works for everything, ERC-8004 agent binding included. **A read defaults to mainnet; a write has no default at all.** `ensv2 whois`, `price`, `status` and the other reads answer about chain 1, where the real names are. Anything that sends a transaction — `register`, `provision`, `faucet`, `records set`, `primary set`, `resolver deploy`, `agent register`, `agent set-uri`, `jobs resume` — refuses until you name a deployment, with `--deployment`, `--chain`, or `MM_ENSV2_DEPLOYMENT`. A testnet default used to stand in for safety and did the opposite: forget the flag and the run registers a name, binds an agent to it, publishes its records and verifies every one of them — convincing, worthless, reported as a success. Refusing to guess is the plugin's first invariant, and a write is where guessing costs the most. Two older Sepolia tables remain pinned (`hackathon`, and the dead `beta`) so existing jobs still resolve; see [Which deployment](#which-deployment). The plugin never falls back to ENSv1 behaviour, on any chain. Docs, explainer and live evidence: **https://mm-ensv2.estmcmxci.co** (every page is also Markdown: append `.md`, or fetch `/llms.txt`).
 
 ## Sixty seconds
 
 ```bash
 mm ensv2 status                        # is this chain really serving ENSv2? fail-closed checks, refuses otherwise
-mm ensv2 faucet                        # 100 test USDC, this deployment's payment token
-mm ensv2 provision myagent --agent-uri https://agent.example/agent.json --endpoints web=https://agent.example
-mm ensv2 primary set myagent.eth       # the wallet now resolves back to its name
+mm ensv2 faucet --deployment sepolia   # 100 test USDC, this deployment's payment token
+mm ensv2 provision myagent --deployment sepolia --agent-uri https://agent.example/agent.json --endpoints web=https://agent.example
+mm ensv2 primary set myagent.eth --deployment sepolia   # the wallet now resolves back to its name
 ```
 
 `provision` runs resolver, commit, approve, register, agent bind and records as **one resumable job**. Kill it anywhere and run it again. It never pays twice.
@@ -44,7 +44,7 @@ mm ensv2 status
 
 ### Verify
 
-`mm ensv2 status` must show `isV2: true` and eight passing checks against the default `sepolia` table. `mm ensv2 status --deployment mainnet` must also pass, with the same eight — that is ENSv2 on chain 1. `mm ensv2 status --chain 8453` must refuse: the plugin pins no deployment there, and refusing rather than guessing is its first invariant.
+`mm ensv2 status` must show `isV2: true` and eight passing checks against the default `mainnet` table — that is ENSv2 on chain 1. `mm ensv2 status --deployment sepolia` must also pass, with the same eight. `mm ensv2 status --chain 8453` must refuse: the plugin pins no deployment there, and refusing rather than guessing is its first invariant.
 
 ## For agents
 
@@ -63,7 +63,7 @@ Every command accepts `--json`. The host wraps the result as `{ "ok": true, "dat
 
 Or steps 1–6 as one job: `mm ensv2 provision NAME … --json`, then `mm ensv2 jobs show JOBID --json`.
 
-Rules that keep you out of trouble: **never re-send a write because a call failed** (a failed call is not a failed transaction; re-run the same command and it re-derives state from chain, or read `jobs show`); every write has an inspectable plan (`resolver plan`, `provision --dry-run`, `records get`, `primary get`); every command is idempotent for the same inputs; **mainnet writes spend real USDC** (`--deployment mainnet` is never the default — check `deployment` in any `--json` output before a write); the commit secret under `~/.mm-plugin-ensv2/` is private, do not read or move it.
+Rules that keep you out of trouble: **never re-send a write because a call failed** (a failed call is not a failed transaction; re-run the same command and it re-derives state from chain, or read `jobs show`); every write has an inspectable plan (`resolver plan`, `provision --dry-run`, `records get`, `primary get`); every command is idempotent for the same inputs; **mainnet writes spend real USDC**, and no write has a default deployment at all: omit `--deployment`/`--chain`/`MM_ENSV2_DEPLOYMENT` and you get `ENSV2_DEPLOYMENT_REQUIRED` rather than a guess. Reads default to mainnet. Check `deployment` in any `--json` output before and after a write; the commit secret under `~/.mm-plugin-ensv2/` is private, do not read or move it.
 
 ## Which deployment
 
@@ -71,7 +71,7 @@ Four deployments are pinned. Pick one with `--deployment`, available on every co
 
 **ENSv2 is live on Ethereum mainnet as of 2026-10-27.** Namechain was cancelled in February 2026 and ENSv2 shipped on L1 instead. Verified on chain: `isENSv2()` is true on `0xeEeE…EeEe`, the root → `.eth` → root hierarchy is consistent both ways, migrated names answer from the v2 `.eth` registry (`nick.eth` reads `REGISTERED` with its own resolver) and unmigrated ones fall through to `ENSV1Resolver` (`vitalik.eth`, `ens.eth` read `RESERVED`). Registration is priced in **real USDC** — about $8.00 a year for a free label — or real DAI.
 
-| | `sepolia` *(default)* | `mainnet` | `hackathon` | `beta` |
+| | `sepolia` | `mainnet` *(default on reads)* | `hackathon` | `beta` |
 |---|---|---|---|---|
 | What it is | ENS Labs' canonical ENSv2 testnet deployment | ENSv2 on Ethereum L1 | the **ETHOnline 2026** deployment | the original beta — **dead** |
 | Chain | 11155111 | **1** | 11155111 | 11155111 |
@@ -80,11 +80,12 @@ Four deployments are pinned. Pick one with `--deployment`, available on every co
 | Payment token | MockUSDC (open `mint`, use `faucet`) | **real USDC** (and real DAI) | its own MockUSDC | its own MockUSDC |
 | ERC-8004 binding | yes | yes | yes | yes |
 | Gate | 8 checks, passing | 8 checks, passing | 7 checks, passing | 5 checks, **failing — correctly** |
-| Use it when | by default, for everything | you want a real name on L1 | you have names or agents there already | never; it is kept only so old jobs resolve |
+| Use it when | you are testing, and said so | reads, and any real name on L1 | you have names or agents there already | never; it is kept only so old jobs resolve |
 
 ```bash
-mm ensv2 status                            # the default: canonical Sepolia
-mm ensv2 status --deployment mainnet       # ENSv2 on L1 — confirm before any write
+mm ensv2 status                            # the read default: ENSv2 on L1
+mm ensv2 status --deployment sepolia       # the canonical testnet table
+mm ensv2 register myagent                  # refused: a write names its own deployment
 mm ensv2 whois nick.eth --deployment mainnet
 export MM_ENSV2_DEPLOYMENT=mainnet         # …or set it once for the session
 ```
@@ -140,9 +141,10 @@ Every command above also accepts:
 
 ```
 --deployment <sepolia|mainnet|hackathon|beta>
-                                which pinned deployment to talk to (default sepolia; env MM_ENSV2_DEPLOYMENT).
-                                Implies its own chain, so --deployment mainnet needs no --chain 1.
---chain <id>                    EVM chain id: 1 or 11155111 (default 11155111). Implies that chain's
+                                which pinned deployment to talk to (env MM_ENSV2_DEPLOYMENT). Reads
+                                default to mainnet; writes REQUIRE this (or --chain). Implies its own
+                                chain, so --deployment mainnet needs no --chain 1.
+--chain <id>                    EVM chain id: 1 or 11155111 (default 1 on reads). Implies that chain's
                                 canonical deployment. Any other chain is refused.
 --json                          machine-readable output
 ```

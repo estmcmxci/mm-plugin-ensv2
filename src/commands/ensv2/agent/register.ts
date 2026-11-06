@@ -9,7 +9,7 @@ import {
 } from "@metamask/agent-wallet/plugin";
 import { type Hex } from "viem";
 import { agentIdFromReceipt, agentInfo, bindPlan } from "../../../lib/agent.js";
-import { resolveTarget, requireAgentIdentity, requireEnsV2, toCommandError } from "../../../lib/gate.js";
+import { resolveWriteTarget, requireAgentIdentity, requireEnsV2, toCommandError } from "../../../lib/gate.js";
 import { selectedEvmAddress } from "../../../lib/wallet.js";
 
 const inputs = {
@@ -30,14 +30,14 @@ const inputs = {
   chain: {
     type: InputFieldType.Text,
     flag: "chain",
-    message: "EVM chain id (default 11155111, Sepolia; 1 for Ethereum mainnet — or just name the deployment, which implies its chain)",
+    message: "EVM chain id (1 for Ethereum mainnet, 11155111 for Sepolia; naming the deployment is enough, it implies its chain)",
     required: false,
     prompt: false,
   },
   deployment: {
     type: InputFieldType.Text,
     flag: "deployment",
-    message: "ENSv2 deployment: sepolia (default, ENS Labs' canonical testnet), mainnet (Ethereum L1 — spends real USDC), hackathon (the ETHOnline 2026 deployment), beta (dead, kept only so old jobs resolve)",
+    message: "ENSv2 deployment, REQUIRED for this command: mainnet (Ethereum L1 — spends real USDC), sepolia (ENS Labs' canonical testnet), hackathon (the ETHOnline 2026 deployment), beta (dead, kept only so old jobs resolve)",
     required: false,
     prompt: false,
   },
@@ -75,8 +75,8 @@ export default class EnsV2AgentRegister extends PluginCommand<AgentRegisterResul
     "Mint an ERC-8004 agent via Adapter8004, bound to your ENSv2 name. One tx, signed through MetaMask policy.";
 
   static override examples = [
-    "<%= config.bin %> ensv2 agent register myagent.eth --uri https://example.com/agent.json",
-    "<%= config.bin %> ensv2 agent register myagent.eth --uri ipfs://bafy... --json",
+    "<%= config.bin %> ensv2 agent register myagent.eth --uri https://example.com/agent.json --deployment sepolia",
+    "<%= config.bin %> ensv2 agent register myagent.eth --uri ipfs://bafy... --json --deployment sepolia",
   ];
 
   static override requiresAuth = true;
@@ -88,7 +88,7 @@ export default class EnsV2AgentRegister extends PluginCommand<AgentRegisterResul
 
   async execute(io: CommandIO): Promise<AgentRegisterResult> {
     const { name, uri, chain, deployment: deploymentFlag } = await io.resolveInputs(inputs);
-    const { chainId, deploymentKey } = resolveTarget(chain, deploymentFlag);
+    const { chainId, deploymentKey } = resolveWriteTarget(chain, deploymentFlag);
     const client = this.ctx.publicClient(chainId);
 
     try {

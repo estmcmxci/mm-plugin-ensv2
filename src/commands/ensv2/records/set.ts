@@ -10,7 +10,7 @@ import {
 import { readFileSync } from "node:fs";
 import { getAddress, type Address } from "viem";
 import { ensip25Key } from "../../../lib/erc7930.js";
-import { resolveTarget, requireEnsV2, requireIdentityRegistry, toCommandError } from "../../../lib/gate.js";
+import { resolveWriteTarget, requireEnsV2, requireIdentityRegistry, toCommandError } from "../../../lib/gate.js";
 import {
   defaultContext,
   endpointKey,
@@ -37,8 +37,8 @@ const inputs = {
   contextFile: t("context-file", "path to a file whose contents become agent-context"),
   endpoints: t("endpoints", "agent-endpoint records: mcp=<url>,a2a=<url>,web=<url> (ENSIP-26)"),
   linkAgent: t("link-agent", "ERC-8004 agent id to link via ENSIP-25 (writes agent-registration[<registry>][<id>] = \"1\")"),
-  chain: t("chain", "EVM chain id (default 11155111, Sepolia; 1 for Ethereum mainnet — or just name the deployment, which implies its chain)"),
-  deployment: t("deployment", "ENSv2 deployment: sepolia (default, ENS Labs' canonical testnet), mainnet (Ethereum L1 — spends real USDC), hackathon (the ETHOnline 2026 deployment), beta (dead, kept only so old jobs resolve)"),
+  chain: t("chain", "EVM chain id (1 for Ethereum mainnet, 11155111 for Sepolia; naming the deployment is enough, it implies its chain)"),
+  deployment: t("deployment", "ENSv2 deployment, REQUIRED for this command: mainnet (Ethereum L1 — spends real USDC), sepolia (ENS Labs' canonical testnet), hackathon (the ETHOnline 2026 deployment), beta (dead, kept only so old jobs resolve)"),
 } satisfies InputSchema;
 
 type RecordsSetResult = {
@@ -63,7 +63,7 @@ export default class EnsV2RecordsSet extends PluginCommand<RecordsSetResult> {
 
   static override examples = [
     '<%= config.bin %> ensv2 records set myagent.eth --description "My agent" --endpoints web=https://agent.example --link-agent 10058',
-    "<%= config.bin %> ensv2 records set myagent.eth --context-file ./agent-context.md --endpoints mcp=https://agent.example/mcp",
+    "<%= config.bin %> ensv2 records set myagent.eth --context-file ./agent-context.md --endpoints mcp=https://agent.example/mcp --deployment sepolia",
   ];
 
   static override requiresAuth = true;
@@ -75,7 +75,7 @@ export default class EnsV2RecordsSet extends PluginCommand<RecordsSetResult> {
 
   async execute(io: CommandIO): Promise<RecordsSetResult> {
     const v = await io.resolveInputs(inputs);
-    const { chainId, deploymentKey } = resolveTarget(v.chain, v.deployment);
+    const { chainId, deploymentKey } = resolveWriteTarget(v.chain, v.deployment);
     const client = this.ctx.publicClient(chainId);
 
     try {

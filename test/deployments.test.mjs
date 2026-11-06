@@ -52,6 +52,7 @@ import {
   requireDeployment,
   requireIdentityRegistry,
   resolveTarget,
+  resolveWriteTarget,
 } from "../dist/lib/gate.js";
 import { MemoryJobStore } from "../dist/lib/jobs.js";
 import { buildRecordsMulticall, COIN_TYPE_ETH } from "../dist/lib/records.js";
@@ -65,12 +66,13 @@ const lower = (s) => String(s).toLowerCase();
 // ---------------------------------------------------------------------------
 // the table
 
-test("four deployments are pinned, two of them g3, and the canonical Sepolia table is the default", () => {
+test("four deployments are pinned, two of them g3, and a bare read means mainnet", () => {
   assert.deepEqual([...DEPLOYMENT_KEYS], ["sepolia", "mainnet", "hackathon", "beta"]);
-  assert.equal(DEFAULT_DEPLOYMENT_KEY, "sepolia");
+  assert.equal(DEFAULT_DEPLOYMENT_KEY, "mainnet");
   assert.equal(deploymentForChain(11155111), SEPOLIA_ENSV2);
   assert.equal(deploymentForChain(1), MAINNET_ENSV2);
-  assert.equal(deploymentFor(11155111), SEPOLIA_ENSV2);
+  assert.equal(deploymentFor(1), MAINNET_ENSV2, "the default key resolves on its own chain");
+  assert.equal(deploymentFor(11155111, "sepolia"), SEPOLIA_ENSV2);
   assert.equal(deploymentFor(11155111, "hackathon"), SEPOLIA_HACKATHON);
   assert.equal(deploymentFor(1, "mainnet"), MAINNET_ENSV2);
   assert.equal(deploymentFor(1, "hackathon"), undefined, "a Sepolia table is never served for chain 1");
@@ -220,15 +222,15 @@ test("every pinned address is EIP-55 checksummed", async () => {
 // deployment selection: flag > env > default
 
 test("selection precedence: --deployment beats the env var beats the default", () => {
-  assert.equal(parseDeploymentKey(undefined, {}), "sepolia");
-  assert.equal(parseDeploymentKey("", {}), "sepolia");
+  assert.equal(parseDeploymentKey(undefined, {}), "mainnet");
+  assert.equal(parseDeploymentKey("", {}), "mainnet");
   assert.equal(parseDeploymentKey(undefined, { MM_ENSV2_DEPLOYMENT: "mainnet" }), "mainnet");
   assert.equal(parseDeploymentKey("sepolia", { MM_ENSV2_DEPLOYMENT: "mainnet" }), "sepolia", "the flag wins over the env var");
   assert.equal(parseDeploymentKey("mainnet", { MM_ENSV2_DEPLOYMENT: "sepolia" }), "mainnet");
   assert.equal(parseDeploymentKey("  beta  ", {}), "beta", "surrounding whitespace is trimmed");
   assert.equal(parseDeploymentKey(undefined, { MM_ENSV2_DEPLOYMENT: "  hackathon " }), "hackathon");
 
-  assert.deepEqual(deploymentSelection(undefined, {}), { key: "sepolia", explicit: false, source: "default" });
+  assert.deepEqual(deploymentSelection(undefined, {}), { key: "mainnet", explicit: false, source: "default" });
   assert.deepEqual(deploymentSelection(undefined, { MM_ENSV2_DEPLOYMENT: "mainnet" }), { key: "mainnet", explicit: true, source: "env" });
   assert.deepEqual(deploymentSelection("mainnet", {}), { key: "mainnet", explicit: true, source: "flag" });
 });
@@ -252,8 +254,8 @@ test("an unknown deployment is refused, never silently defaulted", () => {
 });
 
 test("resolveTarget: a named deployment implies its chain, a named chain implies its deployment", () => {
-  // Neither named: the default, on its own chain.
-  assert.deepEqual(resolveTarget(undefined, undefined, {}), { chainId: 11155111, deploymentKey: "sepolia", deployment: SEPOLIA_ENSV2 });
+  // Neither named, on a READ: mainnet, where the real names are.
+  assert.deepEqual(resolveTarget(undefined, undefined, {}), { chainId: 1, deploymentKey: "mainnet", deployment: MAINNET_ENSV2 });
 
   // Deployment only: no --chain 1 needed to reach mainnet.
   assert.deepEqual(resolveTarget(undefined, "mainnet", {}), { chainId: 1, deploymentKey: "mainnet", deployment: MAINNET_ENSV2 });
@@ -299,12 +301,47 @@ test("resolveTarget: a named deployment implies its chain, a named chain implies
   assert.throws(() => resolveTarget("not-a-chain", undefined, {}), (e) => e.code === "ENSV2_INVALID_CHAIN");
 });
 
+test("resolveWriteTarget: a write never picks a deployment for you", () => {
+  // Nothing named. A read would answer about mainnet; a write refuses, and
+  // says so in terms of what each choice costs.
+  for (const env of [{}, { MM_ENSV2_DEPLOYMENT: "" }, { MM_ENSV2_DEPLOYMENT: "   " }]) {
+    assert.throws(
+      () => resolveWriteTarget(undefined, undefined, env),
+      (e) => {
+        assert.equal(e.code, "ENSV2_DEPLOYMENT_REQUIRED");
+        assert.match(String(e.hint ?? ""), /--deployment mainnet/);
+        assert.match(String(e.hint ?? ""), /--deployment sepolia/);
+        assert.match(String(e.hint ?? ""), /MM_ENSV2_DEPLOYMENT/);
+        return true;
+      },
+      `env ${JSON.stringify(env)} is not a choice`,
+    );
+  }
+  assert.throws(() => resolveWriteTarget("", "", {}), (e) => e.code === "ENSV2_DEPLOYMENT_REQUIRED");
+
+  // Each of the three ways of choosing is accepted, and resolves exactly as a
+  // read would.
+  assert.deepEqual(resolveWriteTarget(undefined, "mainnet", {}), { chainId: 1, deploymentKey: "mainnet", deployment: MAINNET_ENSV2 });
+  assert.deepEqual(resolveWriteTarget(undefined, "sepolia", {}), { chainId: 11155111, deploymentKey: "sepolia", deployment: SEPOLIA_ENSV2 });
+  assert.deepEqual(resolveWriteTarget(undefined, undefined, { MM_ENSV2_DEPLOYMENT: "sepolia" }), { chainId: 11155111, deploymentKey: "sepolia", deployment: SEPOLIA_ENSV2 });
+  assert.deepEqual(resolveWriteTarget("1", undefined, {}), { chainId: 1, deploymentKey: "mainnet", deployment: MAINNET_ENSV2 });
+  assert.deepEqual(resolveWriteTarget("11155111", undefined, {}), { chainId: 11155111, deploymentKey: "sepolia", deployment: SEPOLIA_ENSV2 });
+
+  // Choosing badly still fails as a write exactly as it does as a read: the
+  // refusal to guess must not swallow the other refusals.
+  assert.throws(() => resolveWriteTarget("1", "hackathon", {}), (e) => e.code === "ENSV2_UNSUPPORTED_CHAIN");
+  assert.throws(() => resolveWriteTarget("8453", undefined, {}), (e) => e.code === "ENSV2_UNSUPPORTED_CHAIN");
+  assert.throws(() => resolveWriteTarget("not-a-chain", undefined, {}), (e) => e.code === "ENSV2_INVALID_CHAIN");
+  assert.throws(() => resolveWriteTarget(undefined, "mainnnet", {}), (e) => e.code === "ENSV2_UNKNOWN_DEPLOYMENT");
+});
+
 test("requireDeployment: each table is served only on its own chain", () => {
-  assert.equal(requireDeployment(11155111), SEPOLIA_ENSV2);
+  assert.equal(requireDeployment(11155111, "sepolia"), SEPOLIA_ENSV2);
+  assert.equal(requireDeployment(1), MAINNET_ENSV2, "the default key, on its own chain");
   assert.equal(requireDeployment(11155111, "beta"), SEPOLIA);
   assert.equal(requireDeployment(11155111, "hackathon"), SEPOLIA_HACKATHON);
   assert.equal(requireDeployment(1, "mainnet"), MAINNET_ENSV2);
-  assert.equal(parseChainId(undefined), 11155111);
+  assert.equal(parseChainId(undefined), 1);
 
   for (const key of ["sepolia", "hackathon", "beta"]) {
     assert.throws(() => requireDeployment(1, key), (e) => e.code === "ENSV2_UNSUPPORTED_CHAIN", `${key} is not on mainnet`);

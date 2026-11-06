@@ -450,18 +450,25 @@ export const SEPOLIA: EnsV2Deployment = {
 };
 
 /**
- * The deployment used when neither `--deployment` nor `MM_ENSV2_DEPLOYMENT`
- * says otherwise, and no `--chain` implies another one.
+ * The deployment a READ falls back to when neither `--deployment` nor
+ * MM_ENSV2_DEPLOYMENT says otherwise and no `--chain` implies another one.
+ * A WRITE has no fallback at all: see `resolveWriteTarget` in gate.ts.
  *
- * `sepolia` since 2026-10-27 — ENS Labs' canonical ENSv2 testnet deployment.
- * The default has moved twice before: `beta` from launch through v0.8.0, then
- * `hackathon` in v0.8.1 when `beta`'s table went stale. This time the default
- * IS the canonical line rather than the last table left standing. A testnet
- * stays the default deliberately: mainnet is pinned and fully supported, but
- * spending real USDC is something you ask for with `--deployment mainnet` (or
- * `--chain 1`), never something you get by omission.
+ * `mainnet` since 2026-11-06. The default has moved three times before:
+ * `beta` from launch through v0.8.0, `hackathon` in v0.8.1 when `beta`'s
+ * table went stale, `sepolia` from 2026-10-27 as the canonical testnet line.
+ *
+ * Sepolia was the default to keep a run from spending real USDC by omission.
+ * That protected about $8 and cost something worse: a wallet that forgot the
+ * flag registered a name on a testnet, bound an ERC-8004 agent to it,
+ * published its records and verified every one of them — a whole convincing
+ * run, worth nothing, reported as a success. Silence, not safety.
+ *
+ * So the asymmetry is resolved the other way round, and in two parts: a read
+ * answers about the real names on chain 1, and a write refuses to guess at
+ * all. Neither direction is a silent spend.
  */
-export const DEFAULT_DEPLOYMENT_KEY: DeploymentKey = "sepolia";
+export const DEFAULT_DEPLOYMENT_KEY: DeploymentKey = "mainnet";
 
 /** Every pinned deployment, keyed by its `--deployment` selector. */
 export const DEPLOYMENTS: Readonly<Record<DeploymentKey, EnsV2Deployment>> = {
@@ -476,7 +483,8 @@ export const DEPLOYMENT_KEYS = Object.keys(DEPLOYMENTS) as readonly DeploymentKe
 /**
  * Which deployment a bare `--chain <id>` means. One canonical table per chain;
  * the others on that chain have to be named. Omitting both flags gives
- * `DEFAULT_DEPLOYMENT_KEY`, which is this map's Sepolia entry.
+ * `DEFAULT_DEPLOYMENT_KEY` on a read — this map's mainnet entry — and a
+ * refusal on a write.
  */
 export const DEFAULT_DEPLOYMENT_FOR_CHAIN: Readonly<Record<number, DeploymentKey>> = {
   [SEPOLIA_CHAIN_ID]: "sepolia",

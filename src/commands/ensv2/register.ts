@@ -9,7 +9,7 @@ import {
 } from "@metamask/agent-wallet/plugin";
 import { isAddressEqual, type Address, type Hex } from "viem";
 import type { EnsV2Deployment } from "../../lib/deployments.js";
-import { resolveTarget, requireEnsV2, toCommandError } from "../../lib/gate.js";
+import { resolveWriteTarget, requireEnsV2, toCommandError } from "../../lib/gate.js";
 import { clearPending, getPending, putPending } from "../../lib/pending.js";
 import { resolverInfo, whois } from "../../lib/reads.js";
 import {
@@ -50,14 +50,14 @@ const inputs = {
   chain: {
     type: InputFieldType.Text,
     flag: "chain",
-    message: "EVM chain id (default 11155111, Sepolia; 1 for Ethereum mainnet — or just name the deployment, which implies its chain)",
+    message: "EVM chain id (1 for Ethereum mainnet, 11155111 for Sepolia; naming the deployment is enough, it implies its chain)",
     required: false,
     prompt: false,
   },
   deployment: {
     type: InputFieldType.Text,
     flag: "deployment",
-    message: "ENSv2 deployment: sepolia (default, ENS Labs' canonical testnet), mainnet (Ethereum L1 — spends real USDC), hackathon (the ETHOnline 2026 deployment), beta (dead, kept only so old jobs resolve)",
+    message: "ENSv2 deployment, REQUIRED for this command: mainnet (Ethereum L1 — spends real USDC), sepolia (ENS Labs' canonical testnet), hackathon (the ETHOnline 2026 deployment), beta (dead, kept only so old jobs resolve)",
     required: false,
     prompt: false,
   },
@@ -106,9 +106,9 @@ export default class EnsV2Register extends PluginCommand<RegisterResult> {
     "Register a .eth name on ENSv2: commit, wait, register — paid in the registrar's ERC-20, resolver set at registration. Resumable.";
 
   static override examples = [
-    "<%= config.bin %> ensv2 register myagent",
-    "<%= config.bin %> ensv2 register myagent.eth --years 2",
-    "<%= config.bin %> ensv2 register myagent --json",
+    "<%= config.bin %> ensv2 register myagent --deployment sepolia",
+    "<%= config.bin %> ensv2 register myagent.eth --years 2 --deployment sepolia",
+    "<%= config.bin %> ensv2 register myagent --json --deployment sepolia",
   ];
 
   static override requiresAuth = true;
@@ -120,7 +120,7 @@ export default class EnsV2Register extends PluginCommand<RegisterResult> {
 
   async execute(io: CommandIO): Promise<RegisterResult> {
     const { name: input, years, chain, deployment: deploymentFlag } = await io.resolveInputs(inputs);
-    const { chainId, deploymentKey } = resolveTarget(chain, deploymentFlag);
+    const { chainId, deploymentKey } = resolveWriteTarget(chain, deploymentFlag);
     const client = this.ctx.publicClient(chainId);
 
     try {
