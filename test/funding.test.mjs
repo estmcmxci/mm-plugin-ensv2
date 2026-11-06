@@ -24,7 +24,7 @@ const SHORTFALL = 8_000_021n;
 
 test("Sepolia is told to use the faucet, and is never sent to a swap that refuses testnets", () => {
   const hint = fundingHint(SEPOLIA_ENSV2, SHORTFALL, USDC);
-  assert.match(hint, /mm ensv2 faucet/);
+  assert.match(hint, /mm ensv2 faucet --deployment sepolia/, "the hint's own command must not itself be refused");
   assert.doesNotMatch(hint, /mm swap/, "the host refuses swaps on Sepolia with UNSUPPORTED_CHAIN");
   assert.match(hint, /8\.000021 or more test USDC/, "it names what the wallet is actually short");
 });
@@ -32,7 +32,7 @@ test("Sepolia is told to use the faucet, and is never sent to a swap that refuse
 test("the other Sepolia tables answer like Sepolia — they are the same chain and the same mock token", () => {
   for (const d of [SEPOLIA_HACKATHON, SEPOLIA_BETA]) {
     const hint = fundingHint(d, SHORTFALL, USDC);
-    assert.match(hint, /mm ensv2 faucet/, `${d.key} is on chain ${d.chainId}`);
+    assert.match(hint, new RegExp(`mm ensv2 faucet --deployment ${d.key}`), `${d.key} is on chain ${d.chainId}`);
     assert.doesNotMatch(hint, /mm swap/);
   }
 });

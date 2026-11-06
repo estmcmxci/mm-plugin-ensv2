@@ -62,7 +62,7 @@ export function fundingHint(d: EnsV2Deployment, shortfall: bigint, token: { symb
   const need = formatUnits(shortfall, token.decimals);
   const withHeadroom = formatUnits(divCeil(shortfall * 103n, 100n), token.decimals);
   if (d.chainId === SEPOLIA_CHAIN_ID) {
-    return `Run \`mm ensv2 faucet\` to mint ${need} or more test ${token.symbol}, then run the same command again.`;
+    return `Run \`mm ensv2 faucet --deployment ${d.key}\` to mint ${need} or more test ${token.symbol}, then run the same command again.`;
   }
   if (d.chainId === MAINNET_CHAIN_ID) {
     return (
