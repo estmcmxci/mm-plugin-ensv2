@@ -28,7 +28,7 @@
  *     no step is retried twice within one run. Identity resumption always
  *     re-enters at identity_preflight (D-010).
  */
-import { getAddress, isAddressEqual, zeroAddress, type Address, type Hex } from "viem";
+import { formatUnits, getAddress, isAddressEqual, zeroAddress, type Address, type Hex } from "viem";
 import { labelhash, namehash } from "viem/ens";
 import { TOKEN_STANDARD, adapter8004Abi } from "./abis.js";
 import { agentIdFromReceipt } from "./agent.js";
@@ -62,14 +62,23 @@ import {
 import { ethLabel } from "./names.js";
 import { ReadError, type WhoisInfo } from "./reads.js";
 import { buildRecordsMulticall, diffRecords, type DesiredRecords } from "./records.js";
-import { ZERO_ADDRESS, ZERO_REFERRER, buildApprove, buildCommit, buildRegister, makeSecret, type Calldata, type CommitmentParams } from "./registrar.js";
+import { fileSwapCheckpoints, type PendingSwap, type SwapCheckpoints } from "./pendingswap.js";
+import { ZERO_ADDRESS, ZERO_REFERRER, buildApprove, buildCommit, buildRegister, fundingHint, makeSecret, type Calldata, type CommitmentParams, type Quote } from "./registrar.js";
+import { buildEthSwapCall, ethNeededForSwap, ethSwapSupported, isSwapRefusal, maxEthSwapInput, swapDeadline, swapWrittenOffAt } from "./swap.js";
 import { buildDeployPlan } from "./resolver.js";
 import { encodeFunctionData } from "viem";
 
 // ---------------------------------------------------------------------------
 // Dependencies
 
-export type SubmitRequest = { step: ReceiptStepName; calldata: Calldata; summary: string; details: Record<string, string> };
+/**
+ * `step` is a StepName, not a ReceiptStepName: `payment_settle` submits a
+ * transaction but cannot carry a step receipt, because step-receipt 1.0.0's
+ * stepName enum does not list it and that schema is frozen. Only the receipt
+ * RECORD is constrained to ReceiptStepName (see `receiptRecord`); naming the
+ * step on the wallet request is not.
+ */
+export type SubmitRequest = { step: StepName; calldata: Calldata; summary: string; details: Record<string, string> };
 export type { SubmitResult } from "./executor.js";
 /** Hands unsigned calldata to the wallet. In the plugin this wraps ctx.walletExecutor; it never sees a key. */
 export type Submit = (req: SubmitRequest) => Promise<SubmitResult>;
@@ -81,6 +90,13 @@ export type EngineDeps = {
   deployment: EnsV2Deployment;
   submit: Submit;
   store: JobStore;
+  /**
+   * Where a sent-but-unconfirmed ETH swap is remembered. Outside the job
+   * record on purpose: the tokens land in the WALLET, so a cancelled run's
+   * swap must still be counted by the next one (pendingswap.ts). Defaults to
+   * the file store; the tests inject an in-memory one.
+   */
+  swapCheckpoints?: SwapCheckpoints;
   now?: () => Date;
   sleep?: (ms: number) => Promise<void>;
   log?: (level: "info" | "warn" | "error", msg: string) => void;
@@ -93,6 +109,18 @@ export type RunOptions = {
   resubmitUnconfirmed?: boolean;
   /** Raise the job's spend ceiling (payment-token units) before running. Lowering is ignored with a warning. */
   raiseCeilingTo?: bigint;
+  /**
+   * Where the payment token comes from when the wallet is short. "token"
+   * (the default) halts and says how to fund the wallet; "eth" lets
+   * `payment_settle` buy the shortfall on Uniswap first.
+   *
+   * A RUN option, not an intent field: the intent's EIP-712 projection is
+   * frozen at provisioning-intent 1.0.0 and its digest IS the job id, so
+   * nothing may be added to it (intent.ts). The consequence is that a resume
+   * must pass the flag again — which is the safe direction, since the swap
+   * then cannot happen by omission.
+   */
+  payWith?: "token" | "eth";
 };
 
 /** Thrown by the engine when a job halts. `error` is a schema-valid program error; the job file has already been persisted. */
@@ -302,9 +330,12 @@ async function planProvisionInner(deps: Pick<EngineDeps, "chain" | "deployment" 
   }
   let quoteTotal = 0n;
   let alreadyRegistered = false;
+  /** Only a quote knows the payment token's symbol and decimals; the funding refusal below needs them to be legible. */
+  let paymentToken: Quote["paymentToken"] | null = null;
   if (avail.available) {
     const q = await deps.chain.quote(label, req.durationSeconds);
     quoteTotal = BigInt(q.total);
+    paymentToken = q.paymentToken;
   } else {
     const w = await deps.chain.whois(normalized);
     if (w.status === "REGISTERED" && w.owner && isAddressEqual(w.owner, owner)) {
@@ -369,7 +400,8 @@ async function planProvisionInner(deps: Pick<EngineDeps, "chain" | "deployment" 
   if (opts.checkFunding !== false && !alreadyRegistered && quoteTotal > 0n) {
     const { balance } = await deps.chain.tokenState(owner);
     if (balance < quoteTotal) {
-      halt({ code: "E_INSUFFICIENT_FUNDS", category: "funding", retryability: "requires_user_action", message: `Registering ${normalized} costs ${quoteTotal} token units; this wallet holds ${balance}.`, recoveryAction: { kind: "fund_wallet_and_resume", description: "On Sepolia, run `mm ensv2 faucet` to mint test USDC, then run the same command again." } }, "terminal_failed");
+      // quoteTotal > 0n only when the name quoted, so the token is known here.
+      halt({ code: "E_INSUFFICIENT_FUNDS", category: "funding", retryability: "requires_user_action", message: `Registering ${normalized} costs ${quoteTotal} token units; this wallet holds ${balance}.`, recoveryAction: { kind: "fund_wallet_and_resume", description: fundingHint(d, quoteTotal - balance, paymentToken!) } }, "terminal_failed");
     }
   }
 
@@ -439,6 +471,7 @@ export const STEP_ORDER: readonly StepName[] = [
   "canonicality_check",
   "resolver_deploy",
   "commitment_submit",
+  "payment_settle",
   "payment_token_approve",
   "commitment_wait",
   "price_recheck",
@@ -716,7 +749,22 @@ class Runtime {
     rec.confirmedAt = this.ts();
   }
 
-  private async readReceiptWithPatience(hash: Hex): Promise<ReceiptLite | null> {
+  /**
+   * Submit for a step that cannot carry a step receipt — `payment_settle`,
+   * whose name step-receipt 1.0.0 does not list. The caller is responsible
+   * for the durable record (pendingswap.ts) and for every halt, because none
+   * of txStep's receipt-driven recovery applies.
+   */
+  async submitUnrecorded(name: StepName, c: Calldata, summary: string, details: Record<string, string>): Promise<SubmitOutcome> {
+    this.progress(summary);
+    try {
+      return classifyReturned(await this.deps.submit({ step: name, calldata: c, summary, details }));
+    } catch (e) {
+      return classifyThrown(e);
+    }
+  }
+
+  async readReceiptWithPatience(hash: Hex): Promise<ReceiptLite | null> {
     for (let i = 0; i < 6; i++) {
       const r = await this.deps.chain.receipt(hash);
       if (r) return r;
@@ -1043,6 +1091,310 @@ export async function runJob(deps: EngineDeps, file: JobFile, opts: RunOptions =
         });
         break;
 
+      case "payment_settle":
+        // Buy the payment token the wallet is short, with the ETH it holds.
+        //
+        // This step spends money and leaves NO step receipt: `payment_settle`
+        // is in provisioning-job's step enum but not in step-receipt's, and
+        // both schemas are frozen, so there is nowhere to file the swap's
+        // transaction. `deps.swapCheckpoints` is that record instead, written
+        // before the wallet is asked (pendingswap.ts). Everything txStep
+        // would do for a receipt-bearing step is therefore done by hand here.
+        //
+        // How much to buy is re-derived from the chain every run — the
+        // registrar's quote against the wallet's balance — never read back
+        // from the checkpoint. A swap that already landed shows up as a
+        // smaller shortfall, so a retry buys the remainder and never twice.
+        await run(name, async () => {
+          const checkpoints = deps.swapCheckpoints ?? fileSwapCheckpoints;
+          const reg = await rt.registeredToOwner();
+          if (reg.registered) {
+            rt.recordRegistration(reg.whois);
+            await rt.markStep(name, "skipped", "name already registered to this wallet");
+            return;
+          }
+          const ceiling = BigInt(intent.maxSpend.maxTotalAmount);
+          if (ceiling === 0n) {
+            await rt.markStep(name, "skipped", "nothing to pay");
+            return;
+          }
+          // Whether the name can still be registered is price_recheck's
+          // decision, and it halts terminally with E_NAME_UNAVAILABLE. A
+          // RESERVED or in-grace name also reverts the quote, so asking for
+          // one here would turn that into E_INTERNAL: step aside instead.
+          const label = ethLabel(intent.name.normalized);
+          const avail = await chain.available(label);
+          if (!avail.available) {
+            await rt.markStep(name, "skipped", `${rt.name} is not available to register; price_recheck decides that, not this step`);
+            return;
+          }
+          // The intent, not rt.commitment: a job whose commitment tuple is
+          // missing must still halt at commitment_submit with its own code,
+          // not terminally here.
+          const [q, funds] = await Promise.all([chain.quote(label, BigInt(intent.durationSeconds)), chain.tokenState(rt.owner)]);
+          const total = BigInt(q.total);
+          const token = q.paymentToken;
+          if (funds.balance >= total) {
+            // Nothing to settle. A swap recorded for this wallet has done its
+            // job, whether this run sent it or a cancelled one did.
+            checkpoints.clear(d.chainId, rt.owner);
+            await rt.markStep(name, "skipped", `the wallet holds ${funds.balance} ${token.symbol} units, covering the ${total} quoted`);
+            return;
+          }
+          const shortfall = total - funds.balance;
+
+          // The swap is opt-in, every run. Without the flag this step reports
+          // the shortfall and stops being involved; price_recheck then halts
+          // with the funding hint exactly as it always did.
+          if (opts.payWith !== "eth") {
+            await rt.markStep(name, "skipped", `short ${shortfall} ${token.symbol} units; paying with ETH was not requested (--pay-with eth)`);
+            return;
+          }
+          if (!ethSwapSupported(d.chainId)) {
+            halt(
+              {
+                code: "E_PAYMENT_REQUIRED",
+                category: "funding",
+                retryability: "requires_user_action",
+                message: `Paying with ETH is not available on chain ${d.chainId}: no Uniswap v3 and Chainlink ETH/USD pair is pinned for it.`,
+                recoveryAction: { kind: "fund_wallet_and_resume", description: fundingHint(d, shortfall, token) },
+              },
+              "retryable_failed",
+              "payment_settle",
+            );
+          }
+          // Do not spend ETH on a registration the job will then refuse to pay for.
+          if (total > ceiling) {
+            halt(
+              {
+                code: "E_PRICE_EXCEEDS_MAX_SPEND",
+                category: "funding",
+                retryability: "requires_user_action",
+                message: `The registrar quotes ${q.formatted.total} ${token.symbol} (${total} units); this job's ceiling is ${ceiling} units. Nothing was bought.`,
+                recoveryAction: { kind: "refresh_quote_and_resume", description: `Re-run with --max-spend ${q.formatted.total} (or more) to raise this job's ceiling; no ETH is spent on a registration it cannot pay for.` },
+              },
+              "retryable_failed",
+              "payment_settle",
+            );
+          }
+
+          // A swap this wallet already sent. Until its deadline has demonstrably
+          // passed it may still land, and buying again would pay twice.
+          const saved = checkpoints.get(d.chainId, rt.owner);
+          const nowSec = await chain.chainTime();
+          if (saved) {
+            if (nowSec < swapWrittenOffAt(saved.deadline)) {
+              halt(
+                {
+                  code: "E_PAYMENT_SETTLEMENT_UNKNOWN",
+                  category: "payment",
+                  retryability: "indeterminate",
+                  message:
+                    `A swap for ${saved.amountOut} ${token.symbol} units was sent for this wallet at ${saved.createdAt}` +
+                    `${saved.txHash ? ` (tx ${saved.txHash})` : " (no hash was returned)"} and the wallet does not hold the tokens yet. ` +
+                    `It can still land until ${iso(swapWrittenOffAt(saved.deadline))}; buying again before then could pay twice.`,
+                  source: "wallet",
+                  recoveryAction: {
+                    kind: "inspect_settlement_before_any_retry",
+                    description:
+                      `Do not send another swap. ${saved.txHash ? `Check transaction ${saved.txHash}` : "Check `mm wallet requests list`"} and the wallet's ${token.symbol} balance. ` +
+                      `Once it confirms, run the job again and this step will count the tokens. If it never lands, run the job again after ${iso(swapWrittenOffAt(saved.deadline))}: the router refuses the call past its deadline, so a fresh swap is then safe.`,
+                  },
+                  ...(saved.txHash ? { evidence: { transactionHashes: [saved.txHash] } } : {}),
+                },
+                "retryable_failed",
+                "payment_settle",
+              );
+            }
+            rt.log("warn", `payment_settle: the swap sent at ${saved.createdAt} is past its deadline (${iso(swapWrittenOffAt(saved.deadline))}); the router refuses it now, so a fresh swap is safe.`);
+            checkpoints.clear(d.chainId, rt.owner);
+          }
+
+          // Quote, guard, then send. Every refusal below happens before the
+          // wallet is asked for anything.
+          let quote;
+          try {
+            quote = await chain.ethSwapQuote(shortfall, token.decimals);
+          } catch (e) {
+            if (!isSwapRefusal(e)) throw e;
+            halt(
+              {
+                code: e.code === "ENSV2_ETH_SWAP_REJECTED" ? "E_PAYMENT_REJECTED" : "E_PAYMENT_REQUIRED",
+                category: "funding",
+                retryability: "requires_user_action",
+                message: `${e.message} Nothing was sent.`,
+                source: "protocol",
+                recoveryAction: { kind: "fund_wallet_and_resume", description: `${e.hint ?? ""} ${fundingHint(d, shortfall, token)}`.trim() },
+              },
+              "retryable_failed",
+              "payment_settle",
+            );
+          }
+          // The ETH ceiling is DERIVED from the token ceiling the intent
+          // already authorises, at the oracle price plus the same max fee.
+          // Nothing new is signed, and the intent's frozen projection is
+          // untouched (see intent.ts).
+          const ethCeiling = maxEthSwapInput(ceiling, quote.ethUsd, token.decimals);
+          if (quote.maximumEth > ethCeiling) {
+            halt(
+              {
+                code: "E_PRICE_EXCEEDS_MAX_SPEND",
+                category: "funding",
+                retryability: "requires_user_action",
+                message: `The swap would authorise up to ${quote.maximumEth} wei; the ceiling of ${ceiling} ${token.symbol} units is worth ${ethCeiling} wei at the oracle price. Nothing was sent.`,
+                recoveryAction: { kind: "refresh_quote_and_resume", description: "Raise --max-spend, or fund the wallet with the payment token directly." },
+              },
+              "retryable_failed",
+              "payment_settle",
+            );
+          }
+
+          const deadline = swapDeadline(nowSec);
+          const call = buildEthSwapCall({ quote, deployment: d, recipient: rt.owner, deadline: BigInt(deadline) });
+          const [gasCost, ethBalance] = await Promise.all([
+            chain.txGasCost(call, rt.owner).catch(() => 0n),
+            chain.ethBalance(rt.owner),
+          ]);
+          // Twice the estimate, so a gas-price move between estimate and send
+          // cannot strand the registration with the ETH already spent.
+          const neededEth = ethNeededForSwap(quote, gasCost);
+          if (ethBalance < neededEth) {
+            halt(
+              {
+                code: "E_INSUFFICIENT_FUNDS",
+                category: "funding",
+                retryability: "requires_user_action",
+                message: `Buying ${shortfall} ${token.symbol} units needs up to ${quote.maximumEth} wei plus gas (${neededEth} wei in all); this wallet holds ${ethBalance} wei. Nothing was sent.`,
+                recoveryAction: { kind: "fund_wallet_and_resume", description: `Send this wallet at least ${neededEth - ethBalance} more wei of ETH and run the job again, or fund it with ${token.symbol} directly and drop --pay-with eth.` },
+              },
+              "retryable_failed",
+              "payment_settle",
+            );
+          }
+
+          // The checkpoint goes in BEFORE the wallet sees the request: a
+          // process killed at the prompt must still know a swap may exist.
+          const record: PendingSwap = {
+            chainId: d.chainId,
+            owner: rt.owner,
+            deploymentId: d.deploymentId,
+            amountOut: quote.amountOut.toString(),
+            maximumEth: quote.maximumEth.toString(),
+            fee: quote.fee,
+            deadline,
+            txHash: null,
+            createdAt: rt.ts(),
+          };
+          checkpoints.put(record);
+          upsertStep(job, name, { state: "in_progress", attempts: (existing?.attempts ?? 0) + 1, startedAt: rt.ts() });
+          await rt.save();
+
+          const summary = `Buy ${formatUnits(shortfall, token.decimals)} ${token.symbol} with ETH to pay for ${rt.name}`;
+          const outcome = await rt.submitUnrecorded(name, call, summary, {
+            router: call.to,
+            buying: `${formatUnits(shortfall, token.decimals)} ${token.symbol} (${shortfall} units)`,
+            maxSpend: `${quote.maximumEth} wei`,
+            pool: `${quote.fee / 10_000}%`,
+            deadline: iso(deadline),
+          });
+
+          if (outcome.kind === "not_broadcast") {
+            // Refused before signing: nothing can land, so the checkpoint goes.
+            checkpoints.clear(d.chainId, rt.owner);
+            halt(
+              {
+                code: outcome.code,
+                category: "policy",
+                retryability: "requires_user_action",
+                message: `payment_settle: the wallet did not broadcast the swap — ${outcome.reason}.`,
+                source: "wallet",
+                recoveryAction: { kind: "resume_job", description: "Nothing was sent. Approve the request (or adjust the wallet policy) and run the job again with --pay-with eth.", resumeFrom: "payment_settle" },
+              },
+              "retryable_failed",
+              "payment_settle",
+            );
+          }
+          if (outcome.kind === "unknown") {
+            // The swap may still land. The checkpoint STAYS, and the deadline
+            // in it is what eventually makes buying again safe.
+            halt(
+              {
+                code: "E_PAYMENT_SETTLEMENT_UNKNOWN",
+                category: "payment",
+                retryability: "indeterminate",
+                message: `payment_settle: the wallet request ended without a confirmed outcome — ${outcome.reason}. The swap may still land.`,
+                source: "wallet",
+                recoveryAction: {
+                  kind: "inspect_settlement_before_any_retry",
+                  description:
+                    `Do not send another swap. Check \`mm wallet requests list\`${outcome.walletJobId ? ` and \`mm wallet requests watch ${outcome.walletJobId}\`` : ""} and the wallet's ${token.symbol} balance. ` +
+                    `Run the job again once it confirms, or after ${iso(swapWrittenOffAt(deadline))}, past which the router refuses it.`,
+                },
+              },
+              "retryable_failed",
+              "payment_settle",
+            );
+          }
+
+          record.txHash = outcome.hash;
+          checkpoints.put(record);
+          await rt.save();
+          const receipt = await rt.readReceiptWithPatience(outcome.hash);
+          if (!receipt) {
+            halt(
+              {
+                code: "E_RECEIPT_UNAVAILABLE",
+                category: "payment",
+                retryability: "indeterminate",
+                message: `payment_settle: swap ${outcome.hash} was submitted but its receipt could not be read yet.`,
+                source: "wallet",
+                recoveryAction: {
+                  kind: "inspect_settlement_before_any_retry",
+                  description: `Do not send another swap. Wait for ${outcome.hash} and run the job again; this step counts whatever ${token.symbol} it delivered. Past ${iso(swapWrittenOffAt(deadline))} the router refuses it and a fresh swap is safe.`,
+                },
+                evidence: { transactionHashes: [outcome.hash] },
+              },
+              "retryable_failed",
+              "payment_settle",
+            );
+          }
+          // The outcome is now known either way, so the checkpoint has done
+          // its work: nothing is in flight to protect against.
+          checkpoints.clear(d.chainId, rt.owner);
+          if (receipt.status === "reverted") {
+            halt(
+              {
+                code: "E_TRANSACTION_REVERTED",
+                category: "payment",
+                retryability: "retryable",
+                message: `payment_settle: swap ${outcome.hash} reverted (receipt read, status reverted). No ETH was spent beyond its gas, and no ${token.symbol} was bought.`,
+                source: "protocol",
+                recoveryAction: { kind: "resume_job", description: "The pool moved, or the deadline passed before it was mined. Run the job again with --pay-with eth; the swap is re-quoted from scratch.", resumeFrom: "payment_settle" },
+                evidence: { transactionHashes: [outcome.hash], revertConfirmed: true },
+              },
+              "retryable_failed",
+              "payment_settle",
+            );
+          }
+          const after = await chain.tokenState(rt.owner);
+          if (after.balance < total) {
+            halt(
+              {
+                code: "E_VERIFICATION_MISMATCH",
+                category: "payment",
+                retryability: "retryable",
+                message: `payment_settle: swap ${outcome.hash} succeeded but the wallet holds ${after.balance} ${token.symbol} units, short of the ${total} quoted.`,
+                recoveryAction: { kind: "resume_job", description: "Wait a block and run the job again; the shortfall is re-derived from the balance, so only what is still missing is bought.", resumeFrom: "payment_settle" },
+                evidence: { transactionHashes: [outcome.hash] },
+              },
+              "retryable_failed",
+              "payment_settle",
+            );
+          }
+          await rt.markStep(name, "succeeded", `bought ${shortfall} ${token.symbol} units for at most ${quote.maximumEth} wei through the ${quote.fee / 10_000}% pool (tx ${outcome.hash})`);
+        });
+        break;
+
       case "payment_token_approve":
         await rt.txStep(name, {
           duplicate: "set the same allowance again and only cost gas",
@@ -1118,7 +1470,7 @@ export async function runJob(deps: EngineDeps, file: JobFile, opts: RunOptions =
           const total = BigInt(q.total);
           const ceiling = BigInt(intent.maxSpend.maxTotalAmount);
           if (total > ceiling) halt({ code: "E_PRICE_EXCEEDS_MAX_SPEND", category: "funding", retryability: "requires_user_action", message: `The registrar now quotes ${q.formatted.total} ${q.paymentToken.symbol} (${total} units); the intent's ceiling is ${ceiling} units.`, recoveryAction: { kind: "refresh_quote_and_resume", description: `Re-run with --max-spend ${q.formatted.total} (or more) to raise this job's ceiling; it will not pay above the ceiling it has.` } }, "retryable_failed", "price_recheck");
-          if (funds.balance < total) halt({ code: "E_INSUFFICIENT_FUNDS", category: "funding", retryability: "requires_user_action", message: `Registration costs ${q.formatted.total} ${q.paymentToken.symbol}; this wallet holds ${funds.balance} units.`, recoveryAction: { kind: "fund_wallet_and_resume", description: "On Sepolia, run `mm ensv2 faucet`, then run the job again." } }, "retryable_failed", "price_recheck");
+          if (funds.balance < total) halt({ code: "E_INSUFFICIENT_FUNDS", category: "funding", retryability: "requires_user_action", message: `Registration costs ${q.formatted.total} ${q.paymentToken.symbol}; this wallet holds ${funds.balance} units.`, recoveryAction: { kind: "fund_wallet_and_resume", description: fundingHint(d, total - funds.balance, q.paymentToken) } }, "retryable_failed", "price_recheck");
           if (funds.allowance < total) halt({ code: "E_INSUFFICIENT_ALLOWANCE", category: "funding", retryability: "retryable", message: `The registrar's allowance is ${funds.allowance} units; ${total} are needed.`, recoveryAction: { kind: "grant_allowance_and_resume", description: "Run the job again; payment_token_approve will be re-observed.", resumeFrom: "payment_token_approve" } }, "retryable_failed", "payment_token_approve");
           await rt.markStep(name, "succeeded", `${q.formatted.total} ${q.paymentToken.symbol} ≤ ceiling ${ceiling}`);
         });
@@ -1385,6 +1737,25 @@ export async function observeJob(chain: ProvisionChain, d: EnsV2Deployment, file
         const avail = c ? await chain.available(c.label) : null;
         const expired = !!avail && t0 > 0 && now >= t0 + avail.maxCommitmentAge;
         out.push({ step, recorded: rec(step), observed: t0 === 0 ? "no commitment on chain" : expired ? "commitment expired" : `commitment on chain since ${iso(t0)}`, wouldSubmit: t0 === 0 || expired });
+        break;
+      }
+      case "payment_settle": {
+        if (registered) {
+          out.push({ step, recorded: rec(step), observed: "name registered to owner", wouldSubmit: false });
+          break;
+        }
+        const { balance } = await chain.tokenState(job.facts.owner);
+        const ceiling = BigInt(intent.maxSpend.maxTotalAmount);
+        // A dry run reports the shortfall against the CEILING; the step itself
+        // quotes the registrar and settles against the quote. Close enough to
+        // say whether a swap would be needed, without a second quote here.
+        const short = ceiling > balance ? ceiling - balance : 0n;
+        out.push({
+          step,
+          recorded: rec(step),
+          observed: short === 0n ? `the wallet holds ${balance} units, covering the ceiling of ${ceiling}` : `short ${short} units of the ${ceiling} ceiling; a swap would be needed, and only with --pay-with eth`,
+          wouldSubmit: false,
+        });
         break;
       }
       case "payment_token_approve": {

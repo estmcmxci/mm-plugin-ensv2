@@ -225,6 +225,27 @@ Three transactions, each signed through MetaMask policy (MFA if enabled), each v
 
 Then it checks the registry says `REGISTERED` to you and `UR.findResolver` returns your resolver at offset 0, and clears the checkpoint. Re-running after an interruption resumes with the same secret and commitment; an expired commitment (> 24 h) is re-committed. Price is quoted by the registrar (non-linear over duration; 28-day minimum) and paid in the oracle's ERC-20 — on Sepolia, `mm ensv2 faucet` mints it.
 
+### Paying with ETH: `--pay-with eth`
+
+A wallet short on the payment token stops, and the advice now depends on the chain: Sepolia is told to run `faucet`, mainnet is told to buy the USDC with the ETH it already holds through the host's own `mm swap`. (`mm swap` refuses testnets outright — `UNSUPPORTED_CHAIN`, "Swaps are not supported on Ethereum Sepolia" — which is why only chain 1 is sent there.)
+
+`--pay-with eth`, on `register`, `provision` and `jobs resume`, does that buying inside the run instead:
+
+```bash
+mm ensv2 register myagent --deployment mainnet --pay-with eth
+```
+
+One extra transaction, `multicall(deadline, [exactOutputSingle, refundETH])` on Uniswap v3's SwapRouter02: it wraps the ETH, buys **exactly** the token units the wallet is short, and refunds the rest atomically. Exact output is the point — the host's `mm swap` and every DEX aggregator are exact-*in*, so they can land under the quote (which reverts `register`) or over it (which leaves dust). Ported from ENS Labs' own [apps-monorepo#1684](https://github.com/ensdomains/apps-monorepo/pull/1684), which added the same path to the ENS manager checkout, with its guards intact:
+
+- the cheapest routing pool of 0.05% / 0.3% / 1%, at its 2% slippage limit, must cost no more than the Chainlink ETH/USD price of the tokens plus 3% (floor: 2 whole tokens). Stale rounds, non-positive answers and rounds answered before they were asked are refused;
+- the ETH it may spend is derived from the spend ceiling you already accepted, at the oracle price — nothing new is signed, and the intent's EIP-712 projection is untouched;
+- the wallet must cover the swap plus twice its estimated gas;
+- a swap is checkpointed to `~/.mm-plugin-ensv2/pending-swaps.json` (mode 0600), keyed by chain and wallet, **before** it is sent. A run that finds one still inside its deadline stops rather than buying again; past the deadline (plus a five-minute clock margin) the router refuses the old call, so a fresh swap is safe. How much to buy is always re-derived from the on-chain balance, never from the record, so a swap that landed after a cancelled run is counted rather than repeated.
+
+It is never implied: a swap spends the wallet's ETH, so it has to be asked for, every run — the same reason `--deployment mainnet` is not the default. On Sepolia `faucet` remains the better answer, and per #1684's own measurements Sepolia's pools price ETH near $28,000 against Chainlink's ~$2,266, so a swap there proves nothing about mainnet.
+
+One consequence worth knowing: `payment_settle` is in provisioning-job 1.0.0's step enum but not in step-receipt 1.0.0's, and both schemas are frozen. The swap therefore carries no step receipt and does not appear in a job's transaction list; it is reported in the run's log and in the checkpoint file while in flight. Nothing about the registration's own receipts changes.
+
 ### Durable jobs: `provision` and `jobs`
 
 `provision` runs the whole ladder — resolver deploy, commit, approve, wait, register, ERC-8004 bind through Adapter8004, and the record set (addr, description, url, `agent-endpoint[…]`, `agent-context`, and the ENSIP-25 link) — as **one job** that survives the process dying at any point.

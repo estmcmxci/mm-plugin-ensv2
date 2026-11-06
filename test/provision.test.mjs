@@ -295,7 +295,7 @@ test("the intent is schema-valid, direct-custody, and pins the adapter implement
   assert.equal(i.name.normalized, "durable.eth");
   assert.equal(i.name.input, "Durable");
   assert.equal(i.maxSpend.maxTotalAmount, w.chain.price.toString());
-  assert.deepEqual(stepsFor(i), ["canonicality_check", "resolver_deploy", "commitment_submit", "payment_token_approve", "commitment_wait", "price_recheck", "registration_submit", "identity_preflight", "identity_bind", "identity_verify", "records_configure", "ens_verify"]);
+  assert.deepEqual(stepsFor(i), ["canonicality_check", "resolver_deploy", "commitment_submit", "payment_settle", "payment_token_approve", "commitment_wait", "price_recheck", "registration_submit", "identity_preflight", "identity_bind", "identity_verify", "records_configure", "ens_verify"]);
 });
 
 // ---------------------------------------------------------------------------
@@ -483,7 +483,7 @@ test("register standalone: reuse-existing resolver, identity none, no records", 
   const plan = await startJob(w, request({ identity: null, records: { addr: null, texts: {} }, resolverMode: "reuse-existing" }));
   assert.equal(plan.kind, "new");
   assert.equal(plan.file.intent.identity, "none");
-  assert.deepEqual(stepsFor(plan.file.intent), ["canonicality_check", "commitment_submit", "payment_token_approve", "commitment_wait", "price_recheck", "registration_submit", "ens_verify"]);
+  assert.deepEqual(stepsFor(plan.file.intent), ["canonicality_check", "commitment_submit", "payment_settle", "payment_token_approve", "commitment_wait", "price_recheck", "registration_submit", "ens_verify"]);
   const file = await runJob(w.deps(exec), plan.file);
   assertCompleted(file, { identity: false });
   assert.equal(file.job.outcome.identity, "not_requested");
