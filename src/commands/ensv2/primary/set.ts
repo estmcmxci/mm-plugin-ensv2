@@ -7,14 +7,14 @@ import {
   schemaToArgs,
   schemaToFlags,
 } from "@metamask/agent-wallet/plugin";
-import { resolveTarget, requireEnsV2, toCommandError } from "../../../lib/gate.js";
+import { resolveWriteTarget, requireEnsV2, toCommandError } from "../../../lib/gate.js";
 import { planSetPrimary, primaryStatus } from "../../../lib/primary.js";
 import { selectedEvmAddress } from "../../../lib/wallet.js";
 
 const inputs = {
   name: { type: InputFieldType.Text, flag: "name", message: "ENS name to make this wallet's primary name (must already resolve to this wallet)", required: true, index: 0 },
-  chain: { type: InputFieldType.Text, flag: "chain", message: "EVM chain id (default 11155111, Sepolia; 1 for Ethereum mainnet — or just name the deployment, which implies its chain)", required: false, prompt: false },
-  deployment: { type: InputFieldType.Text, flag: "deployment", message: "ENSv2 deployment: sepolia (default, ENS Labs' canonical testnet), mainnet (Ethereum L1 — spends real USDC), hackathon (the ETHOnline 2026 deployment), beta (dead, kept only so old jobs resolve)", required: false, prompt: false },
+  chain: { type: InputFieldType.Text, flag: "chain", message: "EVM chain id (1 for Ethereum mainnet, 11155111 for Sepolia; naming the deployment is enough, it implies its chain)", required: false, prompt: false },
+  deployment: { type: InputFieldType.Text, flag: "deployment", message: "ENSv2 deployment, REQUIRED for this command: mainnet (Ethereum L1 — spends real USDC), sepolia (ENS Labs' canonical testnet), hackathon (the ETHOnline 2026 deployment), beta (dead, kept only so old jobs resolve)", required: false, prompt: false },
 } satisfies InputSchema;
 
 type PrimarySetResult = {
@@ -42,7 +42,7 @@ type PrimarySetResult = {
 export default class EnsV2PrimarySet extends PluginCommand<PrimarySetResult> {
   static override description = "Set this wallet's primary ENS name (reverse record), one tx. The name must already resolve to this wallet.";
 
-  static override examples = ["<%= config.bin %> ensv2 primary set myagent.eth", "<%= config.bin %> ensv2 primary get"];
+  static override examples = ["<%= config.bin %> ensv2 primary set myagent.eth --deployment sepolia", "<%= config.bin %> ensv2 primary get --deployment sepolia"];
 
   static override requiresAuth = true;
   static override requiresInit = true;
@@ -53,7 +53,7 @@ export default class EnsV2PrimarySet extends PluginCommand<PrimarySetResult> {
 
   async execute(io: CommandIO): Promise<PrimarySetResult> {
     const v = await io.resolveInputs(inputs);
-    const { chainId, deploymentKey } = resolveTarget(v.chain, v.deployment);
+    const { chainId, deploymentKey } = resolveWriteTarget(v.chain, v.deployment);
     const client = this.ctx.publicClient(chainId);
     try {
       const { deployment: d } = await requireEnsV2(client, chainId, deploymentKey);

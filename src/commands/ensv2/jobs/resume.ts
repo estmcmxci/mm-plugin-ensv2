@@ -2,7 +2,7 @@ import { CommandError, type CommandIO, InputFieldType, type InputSchema, PluginC
 import { isAddressEqual, parseUnits } from "viem";
 import { erc20Abi } from "../../../lib/abis.js";
 import { deploymentByDeploymentId } from "../../../lib/deployments.js";
-import { resolveTarget, requireDeployment, requireEnsV2 } from "../../../lib/gate.js";
+import { parsePayWith, requireDeployment, requireEnsV2, resolveWriteTarget } from "../../../lib/gate.js";
 import { defaultStore, engineDeps, jobErrorToCommandError, summarize } from "../../../lib/hostjobs.js";
 import { runJob } from "../../../lib/provision.js";
 import { selectedEvmAddress } from "../../../lib/wallet.js";
@@ -13,10 +13,18 @@ const b = (flag: string, message: string) => ({ type: InputFieldType.Boolean, fl
 const inputs = {
   jobId: { type: InputFieldType.Text, flag: "job-id", message: "Job id (see `ensv2 jobs list`)", required: true, index: 0 },
   resubmitUnconfirmed: b("resubmit-unconfirmed", "You have confirmed a step recorded as submitted never landed and is not pending; allow it to be sent again"),
+  payWith: {
+    type: InputFieldType.Text,
+    flag: "pay-with",
+    message:
+      "Where the payment token comes from when the wallet is short: token (default — stop and say how to fund the wallet) or eth (buy the shortfall on Uniswap v3 first, held to the Chainlink ETH/USD price). Never implied: a swap spends the wallet's ETH, so a resume has to ask for it again",
+    required: false,
+    prompt: false,
+  },
   maxSpend: { type: InputFieldType.Text, flag: "max-spend", message: "Raise the job's spend ceiling to this amount in payment-token units (e.g. 8.5); lowering is ignored", required: false, prompt: false },
   verifyRpc: { type: InputFieldType.Text, flag: "verify-rpc", message: "Second, independent RPC URL for the final verification", required: false, prompt: false },
-  chain: { type: InputFieldType.Text, flag: "chain", message: "EVM chain id (default 11155111, Sepolia; 1 for Ethereum mainnet — or just name the deployment, which implies its chain)", required: false, prompt: false },
-  deployment: { type: InputFieldType.Text, flag: "deployment", message: "ENSv2 deployment: sepolia (default, ENS Labs' canonical testnet), mainnet (Ethereum L1 — spends real USDC), hackathon (the ETHOnline 2026 deployment), beta (dead, kept only so old jobs resolve)", required: false, prompt: false },
+  chain: { type: InputFieldType.Text, flag: "chain", message: "EVM chain id (1 for Ethereum mainnet, 11155111 for Sepolia; naming the deployment is enough, it implies its chain)", required: false, prompt: false },
+  deployment: { type: InputFieldType.Text, flag: "deployment", message: "ENSv2 deployment, REQUIRED for this command: mainnet (Ethereum L1 — spends real USDC), sepolia (ENS Labs' canonical testnet), hackathon (the ETHOnline 2026 deployment), beta (dead, kept only so old jobs resolve)", required: false, prompt: false },
 } satisfies InputSchema;
 
 /**
@@ -33,7 +41,7 @@ const inputs = {
  */
 export default class EnsV2JobsResume extends PluginCommand<ProvisionResult> {
   static override description = "Resume a provisioning job by id. Re-derives every step from chain; never repeats a paid step blindly.";
-  static override examples = ["<%= config.bin %> ensv2 jobs resume 3f2a…", "<%= config.bin %> ensv2 jobs resume 3f2a… --resubmit-unconfirmed"];
+  static override examples = ["<%= config.bin %> ensv2 jobs resume 3f2a… --deployment sepolia", "<%= config.bin %> ensv2 jobs resume 3f2a… --resubmit-unconfirmed --deployment sepolia"];
 
   static override requiresAuth = true;
   static override requiresInit = true;
@@ -48,7 +56,7 @@ export default class EnsV2JobsResume extends PluginCommand<ProvisionResult> {
     try {
       const file = await store.get(v.jobId.trim());
       if (!file) throw new CommandError("E_JOB_NOT_FOUND", `No job ${v.jobId} in ${store.dir}.`, "Run `mm ensv2 jobs list --all`.");
-      const { chainId, deploymentKey } = resolveTarget(v.chain, v.deployment);
+      const { chainId, deploymentKey } = resolveWriteTarget(v.chain, v.deployment);
       if (file.job.chain !== `eip155:${chainId}`) throw new CommandError("E_UNSUPPORTED_NETWORK", `Job ${file.job.jobId} is for ${file.job.chain}, not eip155:${chainId}.`, "Omit --chain or pass the job's chain.");
       // Both pinned deployments live on chain 11155111, so the chain check above
       // does NOT separate them. Refuse here, before any RPC, rather than letting
@@ -82,7 +90,7 @@ export default class EnsV2JobsResume extends PluginCommand<ProvisionResult> {
         }
       }
       const deps = await engineDeps({ ctx: this.ctx, io, commandId: "ensv2:jobs:resume", client, deployment: d, store, verifyRpc: v.verifyRpc });
-      const done = await runJob(deps, file, { resubmitUnconfirmed: v.resubmitUnconfirmed, ...(raiseCeilingTo !== undefined ? { raiseCeilingTo } : {}) });
+      const done = await runJob(deps, file, { resubmitUnconfirmed: v.resubmitUnconfirmed, payWith: parsePayWith(v.payWith), ...(raiseCeilingTo !== undefined ? { raiseCeilingTo } : {}) });
       return toResult(done.job, true, summarize(done, store));
     } catch (error) {
       throw jobErrorToCommandError(error, store);

@@ -11,7 +11,7 @@ import { readFileSync } from "node:fs";
 import { isAddressEqual, parseUnits } from "viem";
 import { erc20Abi } from "../../lib/abis.js";
 import { viemProvisionChain } from "../../lib/chain.js";
-import { resolveTarget, requireEnsV2 } from "../../lib/gate.js";
+import { parsePayWith, requireEnsV2, resolveWriteTarget } from "../../lib/gate.js";
 import { defaultStore, engineDeps, jobErrorToCommandError, programErrorToCommandError, summarize, type JobSummary } from "../../lib/hostjobs.js";
 import type { JobRecord } from "../../lib/jobs.js";
 import { ethLabel } from "../../lib/names.js";
@@ -36,10 +36,14 @@ const inputs = {
   noIdentity: b("no-identity", "Skip the ERC-8004 identity (no Adapter8004 bind, no ENSIP-25 link)"),
   dryRun: b("dry-run", "Build the intent and plan, observe the chain, submit nothing, write nothing"),
   maxSpend: t("max-spend", "Spend ceiling in payment-token units (e.g. 8.5); default: the registrar's quote"),
+  payWith: t(
+    "pay-with",
+    "Where the payment token comes from when the wallet is short: token (default — stop and say how to fund the wallet) or eth (buy the shortfall on Uniswap v3 first, held to the Chainlink ETH/USD price). Mainnet and Sepolia only, and never implied: a swap spends the wallet's ETH, so it has to be asked for",
+  ),
   resubmitUnconfirmed: b("resubmit-unconfirmed", "You have confirmed a step recorded as submitted never landed and is not pending; allow it to be sent again"),
   verifyRpc: t("verify-rpc", "Second, independent RPC URL for the final verification (default: MM_ENSV2_VERIFY_RPC or publicnode)"),
-  chain: t("chain", "EVM chain id (default 11155111, Sepolia; 1 for Ethereum mainnet — or just name the deployment, which implies its chain)"),
-  deployment: t("deployment", "ENSv2 deployment: sepolia (default, ENS Labs' canonical testnet), mainnet (Ethereum L1 — spends real USDC), hackathon (the ETHOnline 2026 deployment), beta (dead, kept only so old jobs resolve)"),
+  chain: t("chain", "EVM chain id (1 for Ethereum mainnet, 11155111 for Sepolia; naming the deployment is enough, it implies its chain)"),
+  deployment: t("deployment", "ENSv2 deployment, REQUIRED for this command: mainnet (Ethereum L1 — spends real USDC), sepolia (ENS Labs' canonical testnet), hackathon (the ETHOnline 2026 deployment), beta (dead, kept only so old jobs resolve)"),
 } satisfies InputSchema;
 
 export type ProvisionResult = {
@@ -87,9 +91,9 @@ export default class EnsV2Provision extends PluginCommand<ProvisionResult | Prov
 
   static override examples = [
     '<%= config.bin %> ensv2 provision myagent --agent-uri https://agent.example/agent.json --description "My agent" --endpoints web=https://agent.example',
-    "<%= config.bin %> ensv2 provision myagent --no-identity --dry-run",
+    "<%= config.bin %> ensv2 provision myagent --no-identity --dry-run --deployment sepolia",
     "<%= config.bin %> ensv2 provision myagent --deployment hackathon --agent-uri https://agent.example/agent.json --dry-run",
-    "<%= config.bin %> ensv2 provision myagent --agent-uri ipfs://bafy... --years 2 --json",
+    "<%= config.bin %> ensv2 provision myagent --agent-uri ipfs://bafy... --years 2 --json --deployment sepolia",
   ];
 
   static override requiresAuth = true;
@@ -101,7 +105,7 @@ export default class EnsV2Provision extends PluginCommand<ProvisionResult | Prov
 
   async execute(io: CommandIO): Promise<ProvisionResult | ProvisionDryRun> {
     const v = await io.resolveInputs(inputs);
-    const { chainId, deploymentKey } = resolveTarget(v.chain, v.deployment);
+    const { chainId, deploymentKey } = resolveWriteTarget(v.chain, v.deployment);
     const client = this.ctx.publicClient(chainId);
     const store = defaultStore();
 
@@ -209,7 +213,7 @@ export default class EnsV2Provision extends PluginCommand<ProvisionResult | Prov
       // ---- run
       const deps = await engineDeps({ ctx: this.ctx, io, commandId: "ensv2:provision", client, deployment: d, store, verifyRpc: v.verifyRpc });
       // An explicit --max-spend on a resume raises the existing job's ceiling (the one intent change a resume may make).
-      const file = await runJob(deps, plan.file, { resubmitUnconfirmed: v.resubmitUnconfirmed, ...(plan.kind === "existing" && maxSpend !== undefined ? { raiseCeilingTo: maxSpend } : {}) });
+      const file = await runJob(deps, plan.file, { resubmitUnconfirmed: v.resubmitUnconfirmed, payWith: parsePayWith(v.payWith), ...(plan.kind === "existing" && maxSpend !== undefined ? { raiseCeilingTo: maxSpend } : {}) });
       return toResult(file.job, plan.kind === "existing", summarize(file, store));
     } catch (error) {
       throw jobErrorToCommandError(error, store);

@@ -23,10 +23,12 @@ import {
   quoteRegistration,
   tokenState,
   type Availability,
+  type Calldata,
   type CommitmentParams,
   type Quote,
 } from "./registrar.js";
 import { ownedResolverStatus, type OwnedResolverStatus } from "./resolver.js";
+import { quoteEthSwap, type EthSwapQuote } from "./swap.js";
 
 /** EIP-1967 implementation slot: keccak256("eip1967.proxy.implementation") - 1. */
 export const EIP1967_IMPLEMENTATION_SLOT = "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc" as const;
@@ -53,6 +55,17 @@ export interface ProvisionChain {
   available(label: string): Promise<Availability>;
   quote(label: string, durationSeconds: bigint): Promise<Quote>;
   tokenState(owner: Address): Promise<{ balance: bigint; allowance: bigint }>;
+  /** The wallet's native ETH, for the ETH-funded path: it pays the swap AND its gas. */
+  ethBalance(owner: Address): Promise<bigint>;
+  /**
+   * A quote to buy exactly `amountOut` payment-token units with ETH, held to
+   * the Chainlink price. Behind the interface so the engine's tests need no
+   * Uniswap pools; the guards themselves are pure and tested directly
+   * (swap.ts, test/swap.test.mjs).
+   */
+  ethSwapQuote(amountOut: bigint, decimals: number): Promise<EthSwapQuote>;
+  /** What this call would cost in gas right now, in wei, as the node estimates it. */
+  txGasCost(c: Calldata, from: Address): Promise<bigint>;
   computeCommitment(p: CommitmentParams): Promise<Hex>;
   commitmentTime(commitment: Hex): Promise<number>;
   whois(name: string): Promise<WhoisInfo>;
@@ -92,6 +105,15 @@ export function viemProvisionChain(client: PublicClient, d: EnsV2Deployment): Pr
     available: (label) => checkAvailable(client, d, label),
     quote: (label, duration) => quoteRegistration(client, d, label, duration),
     tokenState: (owner) => tokenState(client, d, owner),
+    ethBalance: (owner) => client.getBalance({ address: owner }),
+    ethSwapQuote: async (amountOut, decimals) => quoteEthSwap(client, d, { amountOut, decimals, nowSeconds: BigInt(await chainTime(client)) }),
+    txGasCost: async (c, from) => {
+      const [gas, fees] = await Promise.all([
+        client.estimateGas({ account: from, to: c.to, data: c.data, value: c.value }),
+        client.estimateFeesPerGas().catch(async () => ({ maxFeePerGas: await client.getGasPrice() })),
+      ]);
+      return gas * (fees.maxFeePerGas ?? 0n);
+    },
     computeCommitment: (p) => computeCommitment(client, d, p),
     commitmentTime: (c) => commitmentTime(client, d, c),
     whois: (name) => whois(client, d, name),

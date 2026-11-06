@@ -31,7 +31,7 @@ export type ActiveEnsV2 = Extract<EnsV2Detection, { isV2: true }>;
 export const DEPLOYMENT_ENV_VAR = "MM_ENSV2_DEPLOYMENT";
 
 export function parseChainId(raw: string | undefined): number {
-  if (raw == null || raw === "") return SEPOLIA_CHAIN_ID;
+  if (raw == null || raw === "") return MAINNET_CHAIN_ID;
   const n = Number(raw);
   if (!Number.isInteger(n) || n <= 0) {
     throw new CommandError("ENSV2_INVALID_CHAIN", `'${raw}' is not a chain id.`, "Pass a numeric EVM chain id, e.g. 11155111 for Sepolia.");
@@ -44,7 +44,8 @@ export function parseChainId(raw: string | undefined): number {
  *
  *   1. the `--deployment` flag
  *   2. the MM_ENSV2_DEPLOYMENT environment variable
- *   3. `sepolia` — ENS Labs' canonical ENSv2 testnet deployment
+ *   3. `mainnet` — ENSv2 on Ethereum L1 — on a READ. A write has no step 3:
+ *      `resolveWriteTarget` refuses rather than pick for you.
  *
  * An unknown name is a refusal, never a silent fallback to the default: a
  * typo'd `--deployment mainnnet` must not quietly transact anywhere, least of
@@ -78,7 +79,7 @@ function checkedDeploymentKey(value: string, source: string): DeploymentKey {
   throw new CommandError(
     "ENSV2_UNKNOWN_DEPLOYMENT",
     `'${value}' (from ${source}) is not a known ENSv2 deployment.`,
-    `Pass one of: ${DEPLOYMENT_KEYS.join(", ")}. \`sepolia\` is ENS Labs' canonical testnet deployment and the default; \`mainnet\` is ENSv2 on Ethereum L1 and spends real USDC; \`hackathon\` is the ETHOnline deployment; \`beta\` is the dead original, kept only so old jobs resolve.`,
+    `Pass one of: ${DEPLOYMENT_KEYS.join(", ")}. \`mainnet\` is ENSv2 on Ethereum L1 and spends real USDC; \`sepolia\` is ENS Labs' canonical testnet deployment; \`hackathon\` is the ETHOnline deployment; \`beta\` is the dead original, kept only so old jobs resolve.`,
   );
 }
 
@@ -156,10 +157,14 @@ export async function requireEnsV2(
  *   chain only      -> that chain's canonical deployment
  *                      (`DEFAULT_DEPLOYMENT_FOR_CHAIN`), so `--chain 1` needs
  *                      no `--deployment mainnet`
- *   neither         -> `DEFAULT_DEPLOYMENT_KEY` and its chain: Sepolia
+ *   neither         -> `DEFAULT_DEPLOYMENT_KEY` and its chain: mainnet
  *
  * Deliberately not symmetric with a "nearest match": an unknown chain with no
- * pinned deployment is a refusal, not a silent fallback to Sepolia.
+ * pinned deployment is a refusal, not a silent fallback to the default.
+ *
+ * This is the READ form, and reading chain 1 by default is the point: that is
+ * where the real names are. Anything that sends a transaction must call
+ * `resolveWriteTarget` instead, which has no default to fall back on.
  */
 export function resolveTarget(
   chainRaw: string | undefined,
@@ -185,6 +190,37 @@ export function resolveTarget(
     throw unsupportedChain(chainId);
   }
   return { chainId, deploymentKey: selection.key, deployment: requireDeployment(chainId, selection.key) };
+}
+
+/**
+ * As `resolveTarget`, for an invocation that will send a transaction: the
+ * deployment must have been CHOSEN, by `--deployment`, by MM_ENSV2_DEPLOYMENT,
+ * or by a `--chain` that implies one. Choosing nothing is a refusal.
+ *
+ * The plugin's first invariant is that it refuses rather than guesses, and a
+ * write is where guessing costs the most. Both ways of guessing are bad and
+ * they are bad differently: defaulting to mainnet spends real USDC nobody
+ * asked to spend, and defaulting to a testnet is worse than it looks — the run
+ * succeeds, the name registers, the agent binds, the records verify, and none
+ * of it is real. One failure is loud and one is silent, so neither is a
+ * default. The caller says where.
+ *
+ * Reads are unaffected: `resolveTarget` still answers about chain 1.
+ */
+export function resolveWriteTarget(
+  chainRaw: string | undefined,
+  deploymentRaw: string | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): { chainId: number; deploymentKey: DeploymentKey; deployment: EnsV2Deployment } {
+  const chainNamed = chainRaw != null && chainRaw !== "";
+  if (!chainNamed && !deploymentSelection(deploymentRaw, env).explicit) {
+    throw new CommandError(
+      "ENSV2_DEPLOYMENT_REQUIRED",
+      "This command sends a transaction, so it will not pick a deployment for you.",
+      `Name one: \`--deployment mainnet\` is ENSv2 on Ethereum L1 and spends real USDC; \`--deployment sepolia\` is ENS Labs' canonical testnet and spends test tokens from \`ensv2 faucet\`. \`--chain 1\` and \`--chain ${SEPOLIA_CHAIN_ID}\` each imply their own, and ${DEPLOYMENT_ENV_VAR} sets it for a whole session.`,
+    );
+  }
+  return resolveTarget(chainRaw, deploymentRaw, env);
 }
 
 /**
@@ -221,6 +257,25 @@ export function requireIdentityRegistry(d: EnsV2Deployment): `0x${string}` {
     "ENSV2_NO_IDENTITY_REGISTRY",
     `Deployment '${d.key}' (chain ${d.chainId}) pins no ERC-8004 identity registry.`,
     "An ENSIP-25 agent-registration key is derived from that registry's address; there is nothing to derive it from here.",
+  );
+}
+
+/**
+ * `--pay-with`: where the payment token comes from when the wallet is short.
+ *
+ * An unrecognised value is a refusal, never a silent fallback to either side —
+ * the same rule as `--deployment`, for a sharper reason: a typo'd
+ * `--pay-with eht` must not quietly decide to spend the wallet's ETH, nor
+ * quietly decide not to and halt as if nothing had been asked for.
+ */
+export function parsePayWith(raw: string | undefined): "token" | "eth" {
+  const v = raw?.trim().toLowerCase();
+  if (!v) return "token";
+  if (v === "token" || v === "eth") return v;
+  throw new CommandError(
+    "ENSV2_INVALID_PAY_WITH",
+    `'${raw}' is not a payment source.`,
+    "Pass `--pay-with token` (the default: stop and say how to fund the wallet) or `--pay-with eth` (buy the shortfall on Uniswap v3 first).",
   );
 }
 

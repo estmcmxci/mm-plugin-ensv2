@@ -7,10 +7,11 @@ import {
   schemaToArgs,
   schemaToFlags,
 } from "@metamask/agent-wallet/plugin";
-import { isAddressEqual, type Address, type Hex } from "viem";
+import { formatUnits, isAddressEqual, type Address, type Hex } from "viem";
 import type { EnsV2Deployment } from "../../lib/deployments.js";
-import { resolveTarget, requireEnsV2, toCommandError } from "../../lib/gate.js";
+import { parsePayWith, resolveWriteTarget, requireEnsV2, toCommandError } from "../../lib/gate.js";
 import { clearPending, getPending, putPending } from "../../lib/pending.js";
+import { clearPendingSwap, getPendingSwap, putPendingSwap } from "../../lib/pendingswap.js";
 import { resolverInfo, whois } from "../../lib/reads.js";
 import {
   ZERO_ADDRESS,
@@ -22,6 +23,7 @@ import {
   checkAvailable,
   commitmentTime,
   computeCommitment,
+  fundingHint,
   makeSecret,
   quoteRegistration,
   tokenState,
@@ -30,6 +32,7 @@ import {
   type CommitmentParams,
 } from "../../lib/registrar.js";
 import { ownedResolverStatus } from "../../lib/resolver.js";
+import { planEthSwap, swapWrittenOffAt } from "../../lib/swap.js";
 import { selectedEvmAddress } from "../../lib/wallet.js";
 
 const inputs = {
@@ -50,14 +53,22 @@ const inputs = {
   chain: {
     type: InputFieldType.Text,
     flag: "chain",
-    message: "EVM chain id (default 11155111, Sepolia; 1 for Ethereum mainnet — or just name the deployment, which implies its chain)",
+    message: "EVM chain id (1 for Ethereum mainnet, 11155111 for Sepolia; naming the deployment is enough, it implies its chain)",
+    required: false,
+    prompt: false,
+  },
+  payWith: {
+    type: InputFieldType.Text,
+    flag: "pay-with",
+    message:
+      "Where the payment token comes from when the wallet is short: token (default — stop and say how to fund the wallet) or eth (buy the shortfall on Uniswap v3 first, held to the Chainlink ETH/USD price). Never implied: a swap spends the wallet's ETH, so it has to be asked for",
     required: false,
     prompt: false,
   },
   deployment: {
     type: InputFieldType.Text,
     flag: "deployment",
-    message: "ENSv2 deployment: sepolia (default, ENS Labs' canonical testnet), mainnet (Ethereum L1 — spends real USDC), hackathon (the ETHOnline 2026 deployment), beta (dead, kept only so old jobs resolve)",
+    message: "ENSv2 deployment, REQUIRED for this command: mainnet (Ethereum L1 — spends real USDC), sepolia (ENS Labs' canonical testnet), hackathon (the ETHOnline 2026 deployment), beta (dead, kept only so old jobs resolve)",
     required: false,
     prompt: false,
   },
@@ -72,7 +83,7 @@ type RegisterResult = {
   durationSeconds: number;
   durationYears: number;
   price: { total: string; symbol: string };
-  txs: { commit: string | null; approve: string | null; register: string };
+  txs: { swap: string | null; commit: string | null; approve: string | null; register: string };
   resumedCommitment: boolean;
   status: string;
   expiresAt: string | null;
@@ -89,7 +100,9 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * Sequence, each step verified on chain before the next:
  *   1. gate; wallet address; label available; wallet's resolver exists
  *      (its address is bound INTO the commitment, so it must exist first)
- *   2. quote from the registrar; balance must cover it
+ *   2. quote from the registrar; balance must cover it — or, with
+ *      `--pay-with eth`, the shortfall is bought on Uniswap v3 first, before
+ *      the commit, so a refused swap leaves no commitment behind
  *   3. commit(makeCommitment(...))  — secret checkpointed to disk FIRST
  *   4. approve(registrar, total) if allowance is short — done during the wait
  *   5. wait until chain time ≥ commit + MIN_COMMITMENT_AGE (60 s), < MAX (24 h)
@@ -103,12 +116,13 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  */
 export default class EnsV2Register extends PluginCommand<RegisterResult> {
   static override description =
-    "Register a .eth name on ENSv2: commit, wait, register — paid in the registrar's ERC-20, resolver set at registration. Resumable.";
+    "Register a .eth name on ENSv2: commit, wait, register — paid in the registrar's ERC-20, resolver set at registration. Resumable. With --pay-with eth, a wallet short on the token buys the shortfall with its ETH first.";
 
   static override examples = [
-    "<%= config.bin %> ensv2 register myagent",
-    "<%= config.bin %> ensv2 register myagent.eth --years 2",
-    "<%= config.bin %> ensv2 register myagent --json",
+    "<%= config.bin %> ensv2 register myagent --deployment sepolia",
+    "<%= config.bin %> ensv2 register myagent.eth --years 2 --deployment sepolia",
+    "<%= config.bin %> ensv2 register myagent --json --deployment sepolia",
+    "<%= config.bin %> ensv2 register myagent --deployment mainnet --pay-with eth",
   ];
 
   static override requiresAuth = true;
@@ -119,8 +133,9 @@ export default class EnsV2Register extends PluginCommand<RegisterResult> {
   protected readonly pluginCommandId = "ensv2:register";
 
   async execute(io: CommandIO): Promise<RegisterResult> {
-    const { name: input, years, chain, deployment: deploymentFlag } = await io.resolveInputs(inputs);
-    const { chainId, deploymentKey } = resolveTarget(chain, deploymentFlag);
+    const { name: input, years, chain, deployment: deploymentFlag, payWith: payWithFlag } = await io.resolveInputs(inputs);
+    const payWith = parsePayWith(payWithFlag);
+    const { chainId, deploymentKey } = resolveWriteTarget(chain, deploymentFlag);
     const client = this.ctx.publicClient(chainId);
 
     try {
@@ -148,14 +163,7 @@ export default class EnsV2Register extends PluginCommand<RegisterResult> {
       // 2. price + funds
       const quote = await quoteRegistration(client, d, label, duration);
       const total = BigInt(quote.total);
-      const { balance, allowance } = await tokenState(client, d, owner);
-      if (balance < total) {
-        throw new CommandError(
-          "ENSV2_INSUFFICIENT_FUNDS",
-          `Registering ${name} costs ${quote.formatted.total} ${quote.paymentToken.symbol}; this wallet holds ${Number(balance) / 10 ** quote.paymentToken.decimals}.`,
-          "On Sepolia, run `mm ensv2 faucet` to mint test USDC.",
-        );
-      }
+      let { balance, allowance } = await tokenState(client, d, owner);
 
       const execute = await this.ctx.walletExecutor(io, "ensv2:register");
       const send = async (cd: Calldata, summary: string, details: Record<string, string>): Promise<Hex> => {
@@ -167,6 +175,75 @@ export default class EnsV2Register extends PluginCommand<RegisterResult> {
         if (r.failureCode) throw new CommandError("ENSV2_TX_FAILED", `${summary} failed: ${r.failureDescription ?? r.failureCode}${r.hash ? ` (tx ${r.hash})` : ""}`, "Fix the cause and re-run; the command resumes from its checkpoint.");
         return r.hash as Hex;
       };
+
+      // 2b. A wallet short on the payment token stops here with advice, or —
+      //     only when asked for — buys the shortfall with the ETH it holds.
+      //     Before the commit, deliberately: a refused or reverted swap then
+      //     costs nothing but its gas, with no commitment left to age out.
+      let swapTx: Hex | null = null;
+      if (balance < total) {
+        const shortfall = total - balance;
+        if (payWith !== "eth") {
+          throw new CommandError(
+            "ENSV2_INSUFFICIENT_FUNDS",
+            `Registering ${name} costs ${quote.formatted.total} ${quote.paymentToken.symbol}; this wallet holds ${formatUnits(balance, quote.paymentToken.decimals)}.`,
+            `${fundingHint(d, shortfall, quote.paymentToken)} Or pass \`--pay-with eth\` to buy the ${formatUnits(shortfall, quote.paymentToken.decimals)} ${quote.paymentToken.symbol} it is short with the ETH this wallet already holds.`,
+          );
+        }
+        // A swap already sent for this wallet may still land; buying again
+        // before its deadline could pay twice. The amount to buy is always
+        // re-derived from the balance above, never read back from the record.
+        const saved = getPendingSwap(chainId, owner);
+        const nowSec = await chainTime(client);
+        if (saved && nowSec < swapWrittenOffAt(saved.deadline)) {
+          throw new CommandError(
+            "ENSV2_SWAP_PENDING",
+            `A swap for ${saved.amountOut} ${quote.paymentToken.symbol} units was sent for this wallet at ${saved.createdAt}${saved.txHash ? ` (tx ${saved.txHash})` : ""} and the tokens are not here yet.`,
+            `Do not send another. Wait for it and re-run; this command counts whatever it delivered. If it never lands, re-run after ${new Date(swapWrittenOffAt(saved.deadline) * 1000).toISOString()} — past its deadline the router refuses it, so a fresh swap is safe.`,
+          );
+        }
+        if (saved) {
+          io.log("warn", `A swap sent at ${saved.createdAt} is past its deadline; the router refuses it now, so a fresh one is safe.`);
+          clearPendingSwap(chainId, owner);
+        }
+        const plan = await planEthSwap(client, d, {
+          shortfall,
+          decimals: quote.paymentToken.decimals,
+          owner,
+          ceiling: total,
+          nowSeconds: nowSec,
+        });
+        // The checkpoint goes in BEFORE the wallet sees the request.
+        putPendingSwap({
+          chainId,
+          owner,
+          deploymentId: d.deploymentId,
+          amountOut: plan.quote.amountOut.toString(),
+          maximumEth: plan.quote.maximumEth.toString(),
+          fee: plan.quote.fee,
+          deadline: plan.deadline,
+          txHash: null,
+          createdAt: new Date().toISOString(),
+        });
+        swapTx = await send(plan.call, `Buy ${formatUnits(shortfall, quote.paymentToken.decimals)} ${quote.paymentToken.symbol} with ETH to pay for ${name}`, {
+          router: plan.call.to,
+          buying: `${formatUnits(shortfall, quote.paymentToken.decimals)} ${quote.paymentToken.symbol}`,
+          maxSpend: `${plan.quote.maximumEth} wei`,
+          pool: `${plan.quote.fee / 10_000}%`,
+        });
+        // `send` only returns on a confirmed, non-failed transaction, so the
+        // swap is settled either way and the checkpoint has done its work.
+        clearPendingSwap(chainId, owner);
+        ({ balance, allowance } = await tokenState(client, d, owner));
+        if (balance < total) {
+          throw new CommandError(
+            "ENSV2_SWAP_UNSETTLED",
+            `Swap ${swapTx} succeeded but this wallet holds ${formatUnits(balance, quote.paymentToken.decimals)} ${quote.paymentToken.symbol}, short of the ${quote.formatted.total} quoted.`,
+            "Wait a block and re-run; the shortfall is re-derived from the balance, so only what is still missing is bought.",
+          );
+        }
+        io.log("info", `Bought ${formatUnits(shortfall, quote.paymentToken.decimals)} ${quote.paymentToken.symbol} for at most ${plan.quote.maximumEth} wei (tx ${swapTx}).`);
+      }
 
       // 3. commitment — checkpoint before the commit tx is sent
       let params: CommitmentParams;
@@ -240,7 +317,7 @@ export default class EnsV2Register extends PluginCommand<RegisterResult> {
         durationSeconds: Number(duration),
         durationYears: quote.durationYears,
         price: { total: quote.formatted.total, symbol: quote.paymentToken.symbol },
-        txs: { commit: commitTx, approve: approveTx, register: registerTx },
+        txs: { swap: swapTx, commit: commitTx, approve: approveTx, register: registerTx },
         resumedCommitment: resumed,
         status: w.status,
         expiresAt: w.expiresAt,
